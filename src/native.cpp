@@ -24,19 +24,18 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND,UINT,WPARAM,LP
 namespace {
 template<class T>struct Com{T*p=nullptr;~Com(){reset();}Com()=default;Com(const Com&)=delete;Com&operator=(const Com&)=delete;Com(Com&&b)noexcept:p(b.p){b.p=nullptr;}Com&operator=(Com&&b)noexcept{reset();p=b.p;b.p=nullptr;return*this;}void reset(){if(p){p->Release();p=nullptr;}}T**put(){reset();return&p;}T*operator->()const{return p;}operator bool()const{return p!=nullptr;}};
 HMODULE ownModule=nullptr,realDxgi=nullptr;std::recursive_mutex renderMutex;std::mutex hookMutex;std::map<void**,void*> originals;
-ULONGLONG lastMouseMessage[3]{};std::atomic<bool> editing{false};HIMC savedImeContext=nullptr;bool imeDetached=false;sketch::App app;sketch::GameGridReader gameGrid;bool gridPending=false;WNDPROC previousWndProc=nullptr;HWND gameWindow=nullptr;
+ULONGLONG lastMouseMessage[3]{};std::atomic<bool> editing{false};HIMC savedImeContext=nullptr;bool imeDetached=false;sketch::App app;sketch::GameGridReader gameGrid;WNDPROC previousWndProc=nullptr;HWND gameWindow=nullptr;
 std::wstring basePath(){wchar_t buffer[32768];DWORD n=GetModuleFileNameW(ownModule,buffer,32768);std::wstring path(buffer,n);return path.substr(0,path.find_last_of(L"\\/")+1);}
 void log(const char*fmt,...){char line[2048];va_list args;va_start(args,fmt);vsnprintf(line,sizeof(line),fmt,args);va_end(args);std::wstring path=basePath()+L"StarSketch.log";HANDLE file=CreateFileW(path.c_str(),FILE_APPEND_DATA,FILE_SHARE_READ|FILE_SHARE_WRITE,nullptr,OPEN_ALWAYS,FILE_ATTRIBUTE_NORMAL,nullptr);if(file!=INVALID_HANDLE_VALUE){DWORD done;WriteFile(file,line,(DWORD)strlen(line),&done,nullptr);WriteFile(file,"\r\n",2,&done,nullptr);CloseHandle(file);}}
 void require(HRESULT hr,const char*what){if(FAILED(hr)){log("ERROR %s: 0x%08lx",what,(unsigned long)hr);throw std::runtime_error(what);}}
-void systemDxgi(){static std::once_flag once;std::call_once(once,[]{wchar_t path[MAX_PATH];GetSystemDirectoryW(path,MAX_PATH);wcscat_s(path,L"\\dxgi.dll");realDxgi=LoadLibraryW(path);log("StarSketch 0.1.1 | independent DX12 overlay | system DXGI loaded=%d",realDxgi!=nullptr);});}
+void systemDxgi(){static std::once_flag once;std::call_once(once,[]{wchar_t path[MAX_PATH];GetSystemDirectoryW(path,MAX_PATH);wcscat_s(path,L"\\dxgi.dll");realDxgi=LoadLibraryW(path);log("StarSketch 0.1.2 | independent DX12 overlay | system DXGI loaded=%d",realDxgi!=nullptr);});}
 template<class T>T real(const char*name){systemDxgi();return reinterpret_cast<T>(GetProcAddress(realDxgi,name));}
 void patch(void**slot,void*replacement){DWORD old;if(!VirtualProtect(slot,sizeof(void*),PAGE_READWRITE,&old))throw std::runtime_error("VirtualProtect");InterlockedExchangePointer(slot,replacement);DWORD ignored;VirtualProtect(slot,sizeof(void*),old,&ignored);}
 void hook(void*object,size_t index,void*replacement){void**slot=(*reinterpret_cast<void***>(object))+index;std::lock_guard<std::mutex>lock(hookMutex);if(originals.count(slot))return;originals[slot]=*slot;patch(slot,replacement);}
 template<class T>T original(void*object,size_t index){std::lock_guard<std::mutex>lock(hookMutex);return reinterpret_cast<T>(originals.at((*reinterpret_cast<void***>(object))+index));}
-void setEditing(bool enabled){bool previous=editing.exchange(enabled);app.editing=enabled;if(previous==enabled)return;
-
- if(enabled&&app.gridFromGame&&(app.gridEnabled||app.tint))app.needsGrid=true;
- if(!enabled){app.finishGesture();app.cancelGesture();app.manual=false;app.calibration.clear();}
+void setEditing(bool enabled){
+ if(editing.exchange(enabled)==enabled)return;
+ app.setEditing(enabled);
  ClipCursor(nullptr);if(ImGui::GetCurrentContext())ImGui::GetIO().MouseDrawCursor=enabled;log("Drawing mode %s",enabled?"ON":"OFF");
 }
 void pollKeyboard(){
@@ -74,7 +73,7 @@ LRESULT CALLBACK windowProc(HWND window,UINT message,WPARAM wparam,LPARAM lparam
 struct Frame{Com<ID3D12CommandAllocator> allocator;Com<ID3D12Resource> buffer;D3D12_CPU_DESCRIPTOR_HANDLE rtv{};UINT64 fenceValue=0;};
 class Renderer{
 public:
- IDXGISwapChain3*target=nullptr;Com<ID3D12CommandQueue>queue;Com<ID3D12Device>device;Com<ID3D12DescriptorHeap>rtvHeap,srvHeap;Com<ID3D12GraphicsCommandList>commands;Com<ID3D12Fence>fence;std::vector<Frame>frames;HANDLE fenceEvent=nullptr;UINT64 value=0;bool initialized=false,context=false,disabled=false;DXGI_FORMAT format{};
+ IDXGISwapChain3*target=nullptr;Com<ID3D12CommandQueue>queue;Com<ID3D12Device>device;Com<ID3D12DescriptorHeap>rtvHeap,srvHeap;Com<ID3D12GraphicsCommandList>commands;Com<ID3D12Fence>fence;std::vector<Frame>frames;HANDLE fenceEvent=nullptr;UINT64 value=0;bool initialized=false,context=false,disabled=false;DXGI_FORMAT format{};UINT64 renderWidth=0;UINT renderHeight=0;
  void wait(UINT64 v){if(v&&fence->GetCompletedValue()<v){require(fence->SetEventOnCompletion(v,fenceEvent),"fence event");if(WaitForSingleObject(fenceEvent,5000)!=WAIT_OBJECT_0)throw std::runtime_error("GPU fence timeout");}}
  void flush(){if(queue&&fence){require(queue->Signal(fence.p,++value),"queue signal");wait(value);}}
  void releaseBuffers(){if(initialized){flush();ImGui_ImplDX12_Shutdown();initialized=false;}frames.clear();commands.reset();rtvHeap.reset();srvHeap.reset();}
@@ -95,16 +94,53 @@ public:
   barrier(f.buffer.p,D3D12_RESOURCE_STATE_PRESENT,D3D12_RESOURCE_STATE_COPY_SOURCE);D3D12_TEXTURE_COPY_LOCATION src{};src.pResource=f.buffer.p;src.Type=D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;D3D12_TEXTURE_COPY_LOCATION dst{};dst.pResource=readback.p;dst.Type=D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;dst.PlacedFootprint=layout;commands->CopyTextureRegion(&dst,0,0,0,&src,nullptr);barrier(f.buffer.p,D3D12_RESOURCE_STATE_COPY_SOURCE,D3D12_RESOURCE_STATE_PRESENT);require(commands->Close(),"capture close");ID3D12CommandList*list=commands.p;queue->ExecuteCommandLists(1,&list);require(queue->Signal(fence.p,++value),"capture signal");f.fenceValue=value;wait(value);
   sketch::Image image;image.width=(int)desc.Width;image.height=desc.Height;image.rgba.resize(size_t(image.width)*image.height*4);uint8_t*data=nullptr;D3D12_RANGE range{0,(SIZE_T)bytes};require(readback->Map(0,&range,(void**)&data),"capture map");bool supported=true;
   for(int y=0;y<image.height;y++)for(int x=0;x<image.width;x++){auto in=data+layout.Offset+y*layout.Footprint.RowPitch+x*4;auto out=&image.rgba[(y*image.width+x)*4];if(format==DXGI_FORMAT_R8G8B8A8_UNORM||format==DXGI_FORMAT_R8G8B8A8_UNORM_SRGB){memcpy(out,in,4);}else if(format==DXGI_FORMAT_B8G8R8A8_UNORM||format==DXGI_FORMAT_B8G8R8A8_UNORM_SRGB){out[0]=in[2];out[1]=in[1];out[2]=in[0];out[3]=255;}else if(format==DXGI_FORMAT_R10G10B10A2_UNORM){uint32_t q=*(uint32_t*)in;out[0]=(q&1023)*255/1023;out[1]=((q>>10)&1023)*255/1023;out[2]=((q>>20)&1023)*255/1023;out[3]=255;}else supported=false;}
-  D3D12_RANGE written{0,0};readback->Unmap(0,&written);if(supported){saveDiagnosticCapture(image);auto result=sketch::detectGrid(image);app.acceptDetection(result);log("Grid detection: valid=%d confidence=%.3f %s",result.grid.usable(),result.grid.confidence,result.diagnostic.c_str());}else{app.needsGrid=false;app.status="当前 HDR 格式暂不支持自动识别，请手动调整网格";log("Grid capture unsupported format %u",(UINT)format);}
+  D3D12_RANGE written{0,0};readback->Unmap(0,&written);if(supported){saveDiagnosticCapture(image);auto result=sketch::detectGrid(image);app.acceptDetection(result);log("Grid detection: valid=%d confidence=%.3f %s",result.grid.usable(),result.grid.confidence,result.diagnostic.c_str());}else{app.gridRefresh.finish();app.status="当前 HDR 格式暂不支持自动识别，请手动调整网格";log("Grid capture unsupported format %u",(UINT)format);}
   require(f.allocator->Reset(),"capture allocator reset");require(commands->Reset(f.allocator.p,nullptr),"capture reset");
  }
- void render(IDXGISwapChain3*swap){if(disabled||swap!=target)return;std::lock_guard<std::recursive_mutex>lock(renderMutex);try{if(!initialized&&!init(swap))return;pollKeyboard();auto&f=frames.at(swap->GetCurrentBackBufferIndex());wait(f.fenceValue);require(f.allocator->Reset(),"frame allocator reset");require(commands->Reset(f.allocator.p,nullptr),"frame list reset");if(app.needsGrid){auto desc=f.buffer->GetDesc();app.resize(float(desc.Width),float(desc.Height));
-   if(!gridPending){gridPending=gameGrid.begin(float(desc.Width),float(desc.Height),app.gridPlaneOverride,app.gridPlaneZ);if(!gridPending){app.needsGrid=false;if(app.gridFromGame){app.gridConfirmed=false;app.gridFromGame=false;}app.status=gameGrid.diagnostic=="unsupported_game_build"?"当前游戏版本未验证，请使用手动校准":"未读到可靠关卡数据，请重试或手动校准";log("Game grid unavailable: %s",gameGrid.diagnostic.c_str());}}
-   else{sketch::Grid projected;auto state=gameGrid.poll(projected);if(state==sketch::GameGridState::Ready){app.grid=projected;app.gridConfirmed=true;app.gridFromGame=true;app.gridPlaneZ=gameGrid.planeZ;app.needsGrid=false;gridPending=false;app.status=app.gridPlaneOverride?"已按游戏数据定位，使用指定高度层":"已按游戏数据定位，使用当前角色所在高度层";log("Game grid: %s",gameGrid.diagnostic.c_str());}else if(state==sketch::GameGridState::Unavailable){app.needsGrid=false;gridPending=false;if(app.gridFromGame){app.gridConfirmed=false;app.gridFromGame=false;}app.status=app.gridConfirmed?"数据定位未就绪，保留当前网格；可重试或手动调整":"数据定位未就绪，请重试或按 Shift+G 手动校准";log("Game grid unavailable: %s",gameGrid.diagnostic.c_str());}}
-  }else gridPending=false;
-  ImGui_ImplDX12_NewFrame();ImGui_ImplWin32_NewFrame();ImGui::NewFrame();app.editing=editing.load();auto&io=ImGui::GetIO();app.frame(io.DisplaySize.x,io.DisplaySize.y);if(app.wantExit){app.wantExit=false;setEditing(false);}ImGui::Render();
-  barrier(f.buffer.p,D3D12_RESOURCE_STATE_PRESENT,D3D12_RESOURCE_STATE_RENDER_TARGET);commands->OMSetRenderTargets(1,&f.rtv,FALSE,nullptr);ID3D12DescriptorHeap*heap=srvHeap.p;commands->SetDescriptorHeaps(1,&heap);ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(),commands.p);barrier(f.buffer.p,D3D12_RESOURCE_STATE_RENDER_TARGET,D3D12_RESOURCE_STATE_PRESENT);require(commands->Close(),"frame close");ID3D12CommandList*list=commands.p;queue->ExecuteCommandLists(1,&list);require(queue->Signal(fence.p,++value),"frame signal");f.fenceValue=value;
- }catch(const std::exception&e){disabled=true;editing.store(false);ClipCursor(nullptr);log("Overlay disabled after error: %s",e.what());}}
+ void render(IDXGISwapChain3*swap){
+  if(disabled||swap!=target)return;
+  std::lock_guard<std::recursive_mutex>lock(renderMutex);
+  try{
+   if(!initialized&&!init(swap))return;
+   pollKeyboard();
+   auto&f=frames.at(swap->GetCurrentBackBufferIndex());wait(f.fenceValue);
+   require(f.allocator->Reset(),"frame allocator reset");require(commands->Reset(f.allocator.p,nullptr),"frame list reset");
+   auto desc=f.buffer->GetDesc();
+   if(renderWidth&&renderHeight&&(renderWidth!=desc.Width||renderHeight!=desc.Height)){
+    app.requestGrid(true);
+    log("Game resolution changed: %llux%u -> %llux%u; grid refresh scheduled",(unsigned long long)renderWidth,renderHeight,(unsigned long long)desc.Width,desc.Height);
+   }
+   renderWidth=desc.Width;renderHeight=desc.Height;
+   ImGui_ImplDX12_NewFrame();ImGui_ImplWin32_NewFrame();ImGui::NewFrame();
+   auto&io=ImGui::GetIO();app.resize(io.DisplaySize.x,io.DisplaySize.y);
+   auto&refresh=app.gridRefresh;
+   if(refresh.ready()){
+    if(!refresh.pending){
+     refresh.pending=gameGrid.begin(float(desc.Width),float(desc.Height),app.gridPlaneOverride,app.gridPlaneZ);
+     log("Game grid localization started: %llux%u",(unsigned long long)desc.Width,desc.Height);
+     if(!refresh.pending){
+      refresh.finish();app.gridConfirmed=false;app.gridFromGame=false;
+      app.status=gameGrid.diagnostic=="unsupported_game_build"?"当前游戏版本未验证，请使用手动校准":"未读到可靠关卡数据，请重试或手动校准";
+      log("Game grid unavailable: %s",gameGrid.diagnostic.c_str());
+     }
+    }else{
+     sketch::Grid projected;auto state=gameGrid.poll(projected);
+     if(state==sketch::GameGridState::Ready){
+      app.grid=projected;app.gridConfirmed=true;app.gridFromGame=true;app.gridPlaneZ=gameGrid.planeZ;refresh.finish();
+      app.status=app.gridPlaneOverride?"已按游戏数据定位，使用指定高度层":"已按游戏数据定位，使用当前角色所在高度层";
+      log("Game grid: %s",gameGrid.diagnostic.c_str());
+     }else if(state==sketch::GameGridState::Unavailable){
+      refresh.finish();app.gridConfirmed=false;app.gridFromGame=false;
+      app.status="数据定位未就绪，请重试或按 Shift+G 手动校准";
+      log("Game grid unavailable: %s",gameGrid.diagnostic.c_str());
+     }
+    }
+   }
+   app.editing=editing.load();app.frame(io.DisplaySize.x,io.DisplaySize.y);
+   if(app.wantExit){app.wantExit=false;setEditing(false);}ImGui::Render();
+   barrier(f.buffer.p,D3D12_RESOURCE_STATE_PRESENT,D3D12_RESOURCE_STATE_RENDER_TARGET);commands->OMSetRenderTargets(1,&f.rtv,FALSE,nullptr);ID3D12DescriptorHeap*heap=srvHeap.p;commands->SetDescriptorHeaps(1,&heap);ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(),commands.p);barrier(f.buffer.p,D3D12_RESOURCE_STATE_RENDER_TARGET,D3D12_RESOURCE_STATE_PRESENT);require(commands->Close(),"frame close");ID3D12CommandList*list=commands.p;queue->ExecuteCommandLists(1,&list);require(queue->Signal(fence.p,++value),"frame signal");f.fenceValue=value;
+  }catch(const std::exception&e){disabled=true;editing.store(false);ClipCursor(nullptr);log("Overlay disabled after error: %s",e.what());}
+ }
 };
 Renderer renderer;
 HRESULT STDMETHODCALLTYPE present(IDXGISwapChain3*s,UINT sync,UINT flags){if(!(flags&DXGI_PRESENT_TEST))renderer.render(s);return original<HRESULT(STDMETHODCALLTYPE*)(IDXGISwapChain3*,UINT,UINT)>(s,8)(s,sync,flags);}

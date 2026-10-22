@@ -21,8 +21,29 @@ static bool row(const char* id,const char* key,const char* text,bool on=false){
  dl->AddText({p.x+89*s,p.y+7*s},on?Pale:IM_COL32(193,194,188,255),text);if(on)dl->AddCircleFilled({p.x+w-8*s,p.y+17*s},2.8*s,Gold);
  return clicked;
 }
-void App::resize(float w,float h){if(oldWidth>0&&oldHeight>0&&(w!=oldWidth||h!=oldHeight)){float sx=w/oldWidth,sy=h/oldHeight;finishGesture();document.rescale(sx,sy);grid.origin={grid.origin.x*sx,grid.origin.y*sy};grid.u={grid.u.x*sx,grid.u.y*sy};grid.v={grid.v.x*sx,grid.v.y*sy};cancelGesture();finishGesture();manual=false;calibration.clear();}oldWidth=w;oldHeight=h;}
-void App::acceptDetection(const Detection&r){needsGrid=false;if(r.grid.usable()&&r.grid.confidence>=.55f){grid=r.grid;gridFromGame=false;gridConfirmed=true;status="已识别网格，请检查格子中心；可随时手动调整";}else if(r.grid.usable()&&!gridConfirmed){grid=r.grid;gridFromGame=false;gridConfirmed=false;status="检测到候选网格，请确认或手动调整；暂不启用吸附";}else{status=gridConfirmed?"自动识别不可靠，保留当前网格；可手动调整":"未能可靠识别网格，请点击调整网格或按 Shift+G";}}
+bool App::setEditing(bool enabled){
+ if(editing==enabled)return false;
+ editing=enabled;
+ if(enabled)requestGrid();
+ else{finishGesture();cancelGesture();manual=false;calibration.clear();}
+ return true;
+}
+void App::requestGrid(bool resized){
+ finishGesture();cancelGesture();manual=false;calibration.clear();
+ gridConfirmed=false;gridRefresh.request(resized);
+ status=resized?"画面尺寸已变化，等待稳定后自动定位网格":"正在按游戏数据定位网格";
+}
+void App::resize(float w,float h){
+ if(!std::isfinite(w)||!std::isfinite(h)||w<=0||h<=0)return;
+ if(oldWidth>0&&oldHeight>0&&(w!=oldWidth||h!=oldHeight)){
+  float sx=w/oldWidth,sy=h/oldHeight;
+  finishGesture();document.rescale(sx,sy);
+  grid.origin={grid.origin.x*sx,grid.origin.y*sy};grid.u={grid.u.x*sx,grid.u.y*sy};grid.v={grid.v.x*sx,grid.v.y*sy};
+  requestGrid(true);
+ }
+ oldWidth=w;oldHeight=h;
+}
+void App::acceptDetection(const Detection&r){gridRefresh.finish();if(r.grid.usable()&&r.grid.confidence>=.55f){grid=r.grid;gridFromGame=false;gridConfirmed=true;status="已识别网格，请检查格子中心；可随时手动调整";}else if(r.grid.usable()&&!gridConfirmed){grid=r.grid;gridFromGame=false;gridConfirmed=false;status="检测到候选网格，请确认或手动调整；暂不启用吸附";}else{status=gridConfirmed?"自动识别不可靠，保留当前网格；可手动调整":"未能可靠识别网格，请点击调整网格或按 Shift+G";}}
 void App::finishGesture(){if(erasing&&eraseChanged)document.record(eraseBefore);erasing=false;eraseChanged=false;}
 void App::drawMark(ImDrawList*dl,const Mark&m,bool preview){if(m.points.empty())return;float alpha=markOpacity*(preview?.65f:1.f);ImU32 ink=faded(m.color,alpha);
  if(m.kind==Kind::Stroke){if(m.points.size()==1)dl->AddCircleFilled(im(m.points[0]),m.width*.5f,ink);else{std::vector<ImVec2> points;for(auto&p:m.points)points.push_back(im(p));dl->AddPolyline(points.data(),int(points.size()),ink,0,m.width);}return;}
@@ -46,21 +67,21 @@ void App::panel(){float s=uiScale;ImGui::SetNextWindowPos({18*s,22*s},ImGuiCond_
  if(row("arrow","A","箭头",tool==Kind::Arrow)){cancelGesture();tool=Kind::Arrow;}
  if(row("pin","P","编号星标",tool==Kind::Pin)){cancelGesture();tool=Kind::Pin;}
  row("eraser","右键","按住擦除");
- if(row("grid","G","网格与吸附",gridEnabled)){gridEnabled=!gridEnabled;if(gridEnabled&&!gridConfirmed)needsGrid=true;}
- if(row("tint","T","棋盘染色",tint)){tint=!tint;if(tint&&!gridConfirmed)needsGrid=true;}
+ if(row("grid","G","网格与吸附",gridEnabled)){gridEnabled=!gridEnabled;if(gridEnabled&&!gridConfirmed)requestGrid();}
+ if(row("tint","T","棋盘染色",tint)){tint=!tint;if(tint&&!gridConfirmed)requestGrid();}
  if(row("manual","Shift+G","透视四点校准",manual))startManual();
  if(manual&&manualPerspective){ImGui::SetNextItemWidth(145*s);ImGui::InputInt("棋盘列数",&manualColumns);ImGui::SetNextItemWidth(145*s);ImGui::InputInt("棋盘行数",&manualRows);manualColumns=std::clamp(manualColumns,1,200);manualRows=std::clamp(manualRows,1,200);ImGui::Text("已选 %d / 4 个外角",int(calibration.size()));}
  if(ImGui::Button("快速三点校准",{0,25*s}))startManual(false);
- if(ImGui::Button("重新识别",{137*s,29*s})){needsGrid=true;gridEnabled=true;manual=false;calibration.clear();}ImGui::SameLine();if(ImGui::Button("退出绘画  E",{137*s,29*s}))wantExit=true;
- if(grid.usable()&&!gridConfirmed){if(ImGui::Button("采用候选网格",{0,29*s})){gridConfirmed=true;status="已采用候选网格，可继续精调";}}
+ if(ImGui::Button("重新识别",{137*s,29*s})){requestGrid();gridEnabled=true;}ImGui::SameLine();if(ImGui::Button("退出绘画  E",{137*s,29*s}))wantExit=true;
+ if(grid.usable()&&!gridConfirmed){if(ImGui::Button("采用候选网格",{0,29*s})){gridRefresh.cancel();gridConfirmed=true;status="已采用候选网格，可继续精调";}}
  ImGui::Spacing();ImGui::Separator();
  static uint32_t colors[]={IM_COL32(240,204,109,255),IM_COL32(238,111,113,255),IM_COL32(113,187,244,255),IM_COL32(128,214,163,255),IM_COL32(248,240,211,255)};
  for(int i=0;i<5;i++){ImGui::PushID(i);ImVec4 c=ImGui::ColorConvertU32ToFloat4(colors[i]);if(ImGui::ColorButton("##color",c,ImGuiColorEditFlags_NoTooltip,{37*s,24*s}))color=colors[i];if(color==colors[i]){auto a=ImGui::GetItemRectMin(),b=ImGui::GetItemRectMax();dl->AddRect(a,b,Pale,2,0,2);}ImGui::PopID();if(i<4)ImGui::SameLine();}
  ImGui::SetNextItemWidth(155*s);ImGui::SliderFloat("笔触",&penWidth,1,12,"%.1f");ImGui::SetNextItemWidth(155*s);ImGui::SliderFloat("橡皮",&eraseRadius,5,60,"%.0f");ImGui::SetNextItemWidth(155*s);ImGui::SliderFloat("星标大小",&pinRadius,16,48,"%.0f");ImGui::SetNextItemWidth(155*s);ImGui::SliderFloat("标记透明度",&markOpacity,.2f,.95f,"%.2f");ImGui::SetNextItemWidth(155*s);ImGui::SliderFloat("染色透明度",&tintOpacity,.04f,.5f,"%.2f");
  if(grid.usable()&&ImGui::CollapsingHeader("网格精调")){ImGui::PushItemWidth(177*s);
- if(gridFromGame||gridPlaneOverride){if(ImGui::DragFloat("高度层",&gridPlaneZ,.05f,-1000,1000,"%.2f")){gridPlaneOverride=true;needsGrid=true;}if(ImGui::Button("使用角色所在层")){gridPlaneOverride=false;needsGrid=true;}}
- bool changed=ImGui::DragFloat2("基点",&grid.origin.x,.5f,0,0,"%.1f");changed=ImGui::DragFloat2("横向步长",&grid.u.x,.2f,0,0,"%.1f")||changed;changed=ImGui::DragFloat2("纵向步长",&grid.v.x,.2f,0,0,"%.1f")||changed;if(std::abs(grid.px)+std::abs(grid.py)>.00001f)changed=ImGui::DragFloat2("透视参数",&grid.px,.00001f,-.2f,.2f,"%.5f")||changed;if(changed)gridFromGame=false;
- ImGui::PopItemWidth();if(ImGui::Button("格距 ×2")){grid.scaleStep(2);gridFromGame=false;}ImGui::SameLine();if(ImGui::Button("格距 ÷2")){if(length(grid.u)>16&&length(grid.v)>16){grid.scaleStep(.5f);gridFromGame=false;}}}
+ if(gridFromGame||gridPlaneOverride){if(ImGui::DragFloat("高度层",&gridPlaneZ,.05f,-1000,1000,"%.2f")){gridPlaneOverride=true;requestGrid();}if(ImGui::Button("使用角色所在层")){gridPlaneOverride=false;requestGrid();}}
+ bool changed=ImGui::DragFloat2("基点",&grid.origin.x,.5f,0,0,"%.1f");changed=ImGui::DragFloat2("横向步长",&grid.u.x,.2f,0,0,"%.1f")||changed;changed=ImGui::DragFloat2("纵向步长",&grid.v.x,.2f,0,0,"%.1f")||changed;if(std::abs(grid.px)+std::abs(grid.py)>.00001f)changed=ImGui::DragFloat2("透视参数",&grid.px,.00001f,-.2f,.2f,"%.5f")||changed;if(changed){gridFromGame=false;gridRefresh.cancel();gridConfirmed=grid.usable();}
+ ImGui::PopItemWidth();if(ImGui::Button("格距 ×2")){grid.scaleStep(2);gridFromGame=false;gridRefresh.cancel();gridConfirmed=grid.usable();}ImGui::SameLine();if(ImGui::Button("格距 ÷2")){if(length(grid.u)>16&&length(grid.v)>16){grid.scaleStep(.5f);gridFromGame=false;gridRefresh.cancel();gridConfirmed=grid.usable();}}}
  ImGui::Separator();ImGui::TextColored(ImVec4(.79f,.72f,.51f,1),"C 清空  ·  Ctrl+Z 撤销  ·  Ctrl+Y 重做");ImGui::TextDisabled("Esc 取消 / 返回游戏");if(!status.empty()){ImGui::PushTextWrapPos(0);ImGui::TextColored(ImVec4(.76f,.80f,.78f,1),"%s",status.c_str());ImGui::PopTextWrapPos();}
  ImGui::End();ImGui::PopStyleVar(2);
 }
@@ -80,7 +101,7 @@ void App::canvas(float w,float h){auto dl=ImGui::GetBackgroundDrawList();drawGri
  if(inside&&!overUI&&io.MouseDown[1]){auto fg=ImGui::GetForegroundDrawList();fg->AddCircle(im(mouse),eraseRadius*uiScale,IM_COL32(250,224,165,220),48,1.5f);fg->AddCircleFilled(im(mouse),2*uiScale,Gold);}
 }
 void App::frame(float w,float h){resize(w,h);uiScale=std::clamp(h/1080.f,.75f,2.4f);ImGui::GetIO().FontGlobalScale=19.f/32.f*uiScale;
- if(editing){auto&io=ImGui::GetIO();if(!io.KeyCtrl&&!io.KeyAlt){if(ImGui::IsKeyPressed(ImGuiKey_B,false)){cancelGesture();tool=Kind::Stroke;}if(ImGui::IsKeyPressed(ImGuiKey_A,false)){cancelGesture();tool=Kind::Arrow;}if(ImGui::IsKeyPressed(ImGuiKey_P,false)){cancelGesture();tool=Kind::Pin;}if(ImGui::IsKeyPressed(ImGuiKey_G,false)){if(io.KeyShift)startManual();else{gridEnabled=!gridEnabled;if(gridEnabled&&!gridConfirmed)needsGrid=true;}}if(ImGui::IsKeyPressed(ImGuiKey_T,false)){tint=!tint;if(tint&&!gridConfirmed)needsGrid=true;}if(ImGui::IsKeyPressed(ImGuiKey_C,false)){finishGesture();cancelGesture();document.clear();}}
+ if(editing){auto&io=ImGui::GetIO();if(!io.KeyCtrl&&!io.KeyAlt){if(ImGui::IsKeyPressed(ImGuiKey_B,false)){cancelGesture();tool=Kind::Stroke;}if(ImGui::IsKeyPressed(ImGuiKey_A,false)){cancelGesture();tool=Kind::Arrow;}if(ImGui::IsKeyPressed(ImGuiKey_P,false)){cancelGesture();tool=Kind::Pin;}if(ImGui::IsKeyPressed(ImGuiKey_G,false)){if(io.KeyShift)startManual();else{gridEnabled=!gridEnabled;if(gridEnabled&&!gridConfirmed)requestGrid();}}if(ImGui::IsKeyPressed(ImGuiKey_T,false)){tint=!tint;if(tint&&!gridConfirmed)requestGrid();}if(ImGui::IsKeyPressed(ImGuiKey_C,false)){finishGesture();cancelGesture();document.clear();}}
   if(io.KeyCtrl&&ImGui::IsKeyPressed(ImGuiKey_Z,false)){finishGesture();cancelGesture();document.undo();}if(io.KeyCtrl&&ImGui::IsKeyPressed(ImGuiKey_Y,false)){finishGesture();cancelGesture();document.redo();}
   if(ImGui::IsKeyPressed(ImGuiKey_Escape,false)){if(manual){manual=false;calibration.clear();status="已取消网格调整";}else if(drawing)cancelGesture();else wantExit=true;}
   panel();

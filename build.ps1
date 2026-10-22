@@ -1,4 +1,4 @@
-﻿param([switch]$Debug,[string]$ToolchainPath)
+param([switch]$Debug,[string]$ToolchainPath)
 $ErrorActionPreference='Stop'
 $root=$PSScriptRoot
 if(!$ToolchainPath){$ToolchainPath=Join-Path $root 'tools\llvm-mingw-20251021-ucrt-x86_64'}
@@ -13,10 +13,15 @@ $sources=@('src\native.cpp','src\ui.cpp','src\game_grid.cpp','third_party\imgui-
 if($LASTEXITCODE -ne 0){throw 'Plugin compilation failed'}
 & $compiler @common (Join-Path $root 'tests\core_tests.cpp') -o (Join-Path $out 'core_tests.exe')
 if($LASTEXITCODE -ne 0){throw 'Core tests compilation failed'}
+$uiTests=@('tests\ui_lifecycle_tests.cpp','src\ui.cpp','third_party\imgui-1.91.9b\imgui.cpp','third_party\imgui-1.91.9b\imgui_draw.cpp','third_party\imgui-1.91.9b\imgui_tables.cpp','third_party\imgui-1.91.9b\imgui_widgets.cpp')|ForEach-Object{Join-Path $root $_}
+& $compiler @common @uiTests -o (Join-Path $out 'ui_lifecycle_tests.exe') -luser32 -limm32
+if($LASTEXITCODE -ne 0){throw 'UI lifecycle tests compilation failed'}
 & $compiler @common -municode (Join-Path $root 'tests\grid_diagnostic.cpp') -o (Join-Path $out 'grid_diagnostic.exe') -lole32 -lwindowscodecs -luuid
 if($LASTEXITCODE -ne 0){throw 'Grid diagnostic compilation failed'}
 & (Join-Path $out 'core_tests.exe')
 if($LASTEXITCODE -ne 0){throw 'Core tests failed'}
+& (Join-Path $out 'ui_lifecycle_tests.exe')
+if($LASTEXITCODE -ne 0){throw 'UI lifecycle tests failed'}
 $runtimeAssets=Join-Path $out 'StarSketch-assets'
 [IO.Directory]::CreateDirectory($runtimeAssets)|Out-Null
 Copy-Item -LiteralPath (Join-Path $root 'assets\NotoSerifSC.ttf') -Destination (Join-Path $runtimeAssets 'NotoSerifSC.ttf')

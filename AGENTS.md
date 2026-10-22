@@ -5,7 +5,7 @@ StarSketch is a Windows x64 / DirectX 12 in-game sketchpad for Order of the Sink
 ## Build and test
 
 - Run `./setup.ps1` once to fetch the pinned, checksum-verified LLVM-MinGW toolchain.
-- Run `./build.ps1` to compile the DLL, core tests and image diagnostic, then execute core tests.
+- Run `./build.ps1` to compile the DLL, core/UI lifecycle tests and image diagnostic, then execute both test suites.
 - An existing toolchain may be supplied with `./build.ps1 -ToolchainPath <directory>`.
 - Run `./package.ps1` after building to create a player ZIP in ignored `dist/`.
 
@@ -28,5 +28,7 @@ StarSketch is a Windows x64 / DirectX 12 in-game sketchpad for Order of the Sink
 
 ## Current state
 
-0.1.1 test build: data-driven perspective grid verified on r67271, torc_blocked, 3840x2160.
-Broader level, resolution and multi-layer coverage is still pending; see `docs/验证记录.md`.
+0.1.2 test build: refresh on every opening and after a 250ms stable resize; original data grid was verified on r67271, torc_blocked, 3840x2160.
+Publish GitHub updates only when requested by the user.
+0.1.2 opening/resize triggers verified in the normal overworld view at 3840x2160 <-> 3200x1800; see `docs/验证记录.md` for limits.
+Broader level, resolution and multi-layer coverage is still pending.
