@@ -1,0 +1,13 @@
+* text=auto
+*.cpp text eol=lf
+*.hpp text eol=lf
+*.h text eol=lf
+*.md text eol=lf
+*.def text eol=lf
+*.ps1 text eol=crlf
+*.ttf binary
+*.png binary
+*.zip binary
+*.dll binary
+*.txt text eol=lf
+LICENSE text eol=lf

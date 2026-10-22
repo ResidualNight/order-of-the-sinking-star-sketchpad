@@ -1,0 +1,3 @@
+#include "image.hpp"
+#include <iostream>
+int wmain(int argc,wchar_t**argv){if(argc<2)return 2;auto image=sketch::readImage(argv[1]);auto detection=sketch::detectGrid(image);auto&g=detection.grid;std::cout<<"{\"width\":"<<image.width<<",\"height\":"<<image.height<<",\"valid\":"<<(g.usable()?"true":"false")<<",\"confidence\":"<<g.confidence<<",\"origin\":["<<g.origin.x<<","<<g.origin.y<<"],\"u\":["<<g.u.x<<","<<g.u.y<<"],\"v\":["<<g.v.x<<","<<g.v.y<<"],\"diagnostic\":\""<<detection.diagnostic<<"\"}\n";return image.width?0:1;}
