@@ -35,6 +35,13 @@
 !/third_party/imgui-1.91.9b/backends/imgui_impl_dx12.h
 !/third_party/imgui-1.91.9b/backends/imgui_impl_win32.cpp
 !/third_party/imgui-1.91.9b/backends/imgui_impl_win32.h
+!/package-installer.ps1
+!/installer/
+!/installer/*.ps1
+!/installer/*.psm1
+!/installer/*.cmd
+!/installer/*.cs
+!/tests/*.ps1
 # Explicit local-only boundaries; do not add exceptions here.
 /.local/
 /work/

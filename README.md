@@ -10,13 +10,41 @@ An in-game sketchpad for **[Order of the Sinking Star](https://store.steampowere
 
 ## 下载与安装
 
-到 **[Releases](https://github.com/ResidualNight/order-of-the-sinking-star-sketchpad/releases)** 下载玩家 ZIP，无需安装开发环境。
+**两种安装方式同时提供，任选一种。** 两个 ZIP 内的游戏功能与 DLL 完全相同，均为 0.1.2 测试版，无需安装开发环境。完整下载列表见 [0.1.2 Release](https://github.com/ResidualNight/order-of-the-sinking-star-sketchpad/releases/tag/v0.1.2-test)。
 
-1. 退出游戏。
-2. 将 ZIP 内的 `dxgi.dll` 和整个 `StarSketch-assets/` 文件夹放到 `sinking_star.exe` 同级目录。
-3. 保留说明和许可证，照常从 Steam 启动游戏，按 **E** 打开草稿纸。
+| 方式 | 下载文件 | 适合的操作 |
+| --- | --- | --- |
+| 可视化安装 / 卸载 | [StarSketch-0.1.2-installer.zip](https://github.com/ResidualNight/order-of-the-sinking-star-sketchpad/releases/download/v0.1.2-test/StarSketch-0.1.2-installer.zip) | 在窗口内选择游戏文件夹，点击安装、更新或卸载 |
+| 直接复制文件与文件夹 | [StarSketch-0.1.2-r67271-test.zip](https://github.com/ResidualNight/order-of-the-sinking-star-sketchpad/releases/download/v0.1.2-test/StarSketch-0.1.2-r67271-test.zip) | 自己将 DLL 和资源文件夹复制到游戏目录 |
 
-若游戏目录已有其他模组的 `dxgi.dll`，先处理兼容性，不要直接覆盖。更新和卸载前也应退出游戏。卸载时只移除本工具的 DLL 和资源文件夹。
+### 方式一：可视化安装 / 卸载
+
+1. 保存进度并退出游戏，完整解压 `StarSketch-0.1.2-installer.zip`。
+2. 双击 `StarSketch-安装卸载.exe`，也可使用同目录的 `StarSketch-安装卸载.cmd`。
+3. 浏览选择或粘贴游戏安装文件夹，里面应直接包含 `sinking_star.exe`，再点击“安装 / 更新”。
+4. 照常从 Steam 启动游戏，按 **E** 打开草稿纸。
+
+卸载前退出游戏，在同一窗口选择游戏目录并点击“卸载草稿纸”。游戏目录也会留下 `StarSketch-Manager/StarSketch-安装卸载.cmd`，删除下载包后仍可用它卸载；更新需使用完整新版安装包。工具按安装记录和文件哈希处理自身文件，保留游戏、存档和无关文件。已知手动安装的 0.1.1 / 0.1.2 也可由管理工具更新或卸载。详见 [安装工具说明](docs/安装工具说明.md)。
+
+### 方式二：直接复制文件与文件夹（继续保留）
+
+1. 保存进度并退出游戏，解压 `StarSketch-0.1.2-r67271-test.zip`。
+2. 将包内的 **`dxgi.dll` 和整个 `StarSketch-assets/` 文件夹**复制到 `sinking_star.exe` 同级目录；不要在中间多套一层解压文件夹。
+3. 保留包内的使用说明和 `licenses/`，照常从 Steam 启动游戏，按 **E** 打开草稿纸。
+
+复制后的位置应如下：
+
+```text
+游戏安装文件夹/
+├─ sinking_star.exe
+├─ dxgi.dll
+└─ StarSketch-assets/
+   └─ NotoSerifSC.ttf
+```
+
+手动更新时退出游戏，再替换本工具的 DLL 和资源。手动卸载时退出游戏，移除本工具的 `dxgi.dll` 及 `StarSketch-assets/` 内的原字体；有自行添加的文件时请保留，不必删除其他说明、许可证或游戏文件。此方式无需运行安装脚本。
+
+两种方式均需先退出游戏再安装、更新或卸载。若游戏目录已有其他模组的 `dxgi.dll`，请先处理兼容性，不要直接覆盖；可视化工具遇到未知 DXGI、已修改的安装文件或路径链接会停止操作，不会关闭游戏。
 
 ## 操作
 
@@ -54,6 +82,10 @@ An in-game sketchpad for **[Order of the Sinking Star](https://store.steampowere
 .\setup.ps1
 .\build.ps1
 .\package.ps1
+# 可选：从上一步的玩家 ZIP 生成图形安装包
+.\package-installer.ps1
+# 安装器回归：仅操作 work/ 内的隔离目录
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tests\installer_tests.ps1
 ```
 
 已有 LLVM-MinGW 20251021 工具链时：
@@ -69,7 +101,8 @@ An in-game sketchpad for **[Order of the Sinking Star](https://store.steampowere
 | 目录 | 内容 |
 | --- | --- |
 | `src/` | DXGI/DX12、标记模型、界面、只读游戏数据定位 |
-| `tests/` | 核心回归、数字相机样本、图像诊断与实验画布源码 |
+| `tests/` | 核心、界面生命周期与安装器回归，数字相机样本及诊断源码 |
+| `installer/` | 图形窗口、安装/卸载模块及原生启动器源码 |
 | `docs/` | [功能规格](docs/功能规格.md)、[网格实现](docs/网格数据方案评估.md)、[验证记录](docs/验证记录.md)、[更新记录](docs/更新记录.md) |
 | `assets/` | Noto Serif SC 字体与许可证 |
 | `third_party/` | 构建需要的 ImGui 源码与来源记录 |
