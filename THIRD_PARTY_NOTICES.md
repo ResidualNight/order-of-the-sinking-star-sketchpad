@@ -11,3 +11,5 @@ The project license does not replace these upstream licenses. Game executables, 
 The old offline format research used [joric/ootss simp_tool.py](https://github.com/joric/ootss/blob/main/scripts/simp_tool.py) under its [Unlicense](https://github.com/joric/ootss/blob/main/LICENSE). That research tool and extracted game data are local-only and are not linked into the runtime.
 
 The runtime UI and star marker are drawn in code. No other sketchpad mod's source or assets are included.
+
+The README cover (`docs/images/starsketch-cover.png`) is an AI-assisted edit of official [Order of the Sinking Star promotional artwork](https://store.steampowered.com/app/499170/Order_of_the_Sinking_Star/), used to illustrate this independent tool. Rights in the underlying game artwork remain with their respective owners; the project MIT license does not apply to that artwork.

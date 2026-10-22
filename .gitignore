@@ -11,6 +11,8 @@
 !/package.ps1
 !/docs/
 !/docs/*.md
+!/docs/images/
+!/docs/images/starsketch-cover.png
 !/src/
 !/src/*.cpp
 !/src/*.hpp

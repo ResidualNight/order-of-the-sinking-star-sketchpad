@@ -1,5 +1,7 @@
 # StarSketch · 沉星之序游戏内草稿纸
 
+![草稿纸Pro · 沉星之序游戏内草稿纸](docs/images/starsketch-cover.png)
+
 An in-game sketchpad for **[Order of the Sinking Star](https://store.steampowered.com/app/499170/Order_of_the_Sinking_Star/)** on Windows x64 / DirectX 12.
 
 在游戏画面上自由画线、画箭头、放置连续编号星标，并用半透明棋盘辅助观察。网格直接读取游戏数据和相机透视，保留手动校准。独立制作，非游戏官方组件。
@@ -111,4 +113,4 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tests\installer_tests.
 
 ## 许可证
 
-项目代码采用 [MIT](LICENSE)。第三方组件遵循各自许可证，来源与适用范围见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。仓库不包含游戏程序、关卡包或游戏美术资源。
+项目代码采用 [MIT](LICENSE)。第三方组件遵循各自许可证，来源与适用范围见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。仓库不包含游戏程序或关卡包。README 封面基于游戏官方宣传图编辑，相关游戏美术归原权利方所有，不适用本项目 MIT 许可证。
