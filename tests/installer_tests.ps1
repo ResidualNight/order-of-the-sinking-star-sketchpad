@@ -9,7 +9,12 @@ $run=Join-Path $WorkRoot ([guid]::NewGuid().ToString('N'))
 $module=Import-Module (Join-Path $root 'installer\StarSketch.Installer.psm1') -Force -PassThru -DisableNameChecking
 & $module { $script:RunningGameProbe={ $false } }
 function Assert([bool]$Condition,[string]$Message){if(!$Condition){throw "FAIL: $Message"}}
-function Expect-Failure([scriptblock]$Action,[string]$Message){$failed=$false;try{& $Action | Out-Null}catch{$failed=$true};Assert $failed $Message}
+function Expect-Failure([scriptblock]$Action,[string]$Message,[string]$Code){
+ $failure=$null;try{& $Action | Out-Null}catch{$failure=$_.Exception.Message}
+ Assert ($null -ne $failure) $Message
+ Assert ($failure -match '^\[SS-INSTALL-\d{3}\] ') ('missing error code: '+$Message)
+ if($Code){Assert ($failure.StartsWith(('['+$Code+'] '))) ('wrong error code: '+$Message)}
+}
 function Put([string]$Path,[string]$Value){[IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($Path)) | Out-Null;[IO.File]::WriteAllText($Path,$Value,[Text.UTF8Encoding]::new($false))}
 function Hash([string]$Path){(Get-FileHash -LiteralPath $Path).Hash.ToLower()}
 $payload=Join-Path $run 'package\payload';$manager=Join-Path $run 'package'
@@ -25,8 +30,12 @@ function Game([string]$Name){$path=Join-Path $run $Name;Put (Join-Path $path 'si
 function Snapshot([string]$Directory){$values=@{};foreach($f in Get-ChildItem -LiteralPath $Directory -Recurse -File){$values[$f.FullName.Substring($Directory.Length)]=Hash $f.FullName};return ($values.GetEnumerator() | Sort-Object Key | ConvertTo-Json -Compress)}
 $passed=[Collections.Generic.List[string]]::new()
 $bad=Join-Path $run 'not-game';[IO.Directory]::CreateDirectory($bad) | Out-Null
-Expect-Failure {Install-StarSketch $bad $payload $manager} 'wrong folder rejected'
+Expect-Failure {Install-StarSketch $bad $payload $manager} 'wrong folder rejected' 'SS-INSTALL-005'
 $passed.Add('wrong folder rejected')
+Assert ((Format-StarSketchError 'disk denied') -eq '[SS-INSTALL-099] disk denied') 'system errors get fallback identifier'
+Assert ((Format-StarSketchError '[SS-INSTALL-020] existing error') -eq '[SS-INSTALL-020] existing error') 'existing identifier retained'
+Assert ((Format-StarSketchError '') -eq '[SS-INSTALL-099] ') 'empty errors still identified'
+$passed.Add('uncategorized errors receive identifier without duplicating existing codes')
 $game=Game 'fresh install with 空格'
 Install-StarSketch $game $payload $manager | Out-Null
 Assert ((Hash (Join-Path $game 'dxgi.dll')) -eq $known[0]) 'fresh DLL'
@@ -45,8 +54,8 @@ Assert (Test-Path -LiteralPath (Join-Path $game 'sinking_star.exe')) 'game execu
 $passed.Add('fresh install / repeated update / uninstall with unrelated files preserved')
 $foreign=Game 'foreign';Put (Join-Path $foreign 'dxgi.dll') 'other-mod'
 $before=Snapshot $foreign
-Expect-Failure {Install-StarSketch $foreign $payload $manager} 'foreign install refused'
-Expect-Failure {Uninstall-StarSketch $foreign $package} 'foreign uninstall refused'
+Expect-Failure {Install-StarSketch $foreign $payload $manager} 'foreign install refused' 'SS-INSTALL-020'
+Expect-Failure {Uninstall-StarSketch $foreign $package} 'foreign uninstall refused' 'SS-INSTALL-020'
 Assert ((Snapshot $foreign) -eq $before) 'foreign mod unchanged'
 $passed.Add('foreign DXGI protected')
 $modified=Game 'modified';Install-StarSketch $modified $payload $manager | Out-Null
@@ -69,14 +78,14 @@ Expect-Failure {Uninstall-StarSketch $malicious $package} 'traversal state refus
 Assert ((Snapshot $malicious) -eq $before) 'bad state unchanged'
 $passed.Add('manifest path traversal rejected')
 $corrupt=Game 'bad-payload';$payloadFile=Join-Path $payload 'dxgi.dll';$savedDll=[IO.File]::ReadAllText($payloadFile);Put $payloadFile 'corrupted'
-Expect-Failure {Install-StarSketch $corrupt $payload $manager} 'bad payload rejected'
+Expect-Failure {Install-StarSketch $corrupt $payload $manager} 'bad payload rejected' 'SS-INSTALL-026'
 Assert (!(Test-Path -LiteralPath (Join-Path $corrupt 'dxgi.dll'))) 'bad payload not installed'
 Put $payloadFile $savedDll
 $passed.Add('corrupted package rejected before changes')
 $running=Game 'running';$before=Snapshot $running
 & $module {$script:RunningGameProbe={$true}}
-Expect-Failure {Install-StarSketch $running $payload $manager} 'running game blocks install'
-Expect-Failure {Uninstall-StarSketch $running $package} 'running game blocks uninstall'
+Expect-Failure {Install-StarSketch $running $payload $manager} 'running game blocks install' 'SS-INSTALL-019'
+Expect-Failure {Uninstall-StarSketch $running $package} 'running game blocks uninstall' 'SS-INSTALL-019'
 & $module {$script:RunningGameProbe={$false}}
 Assert ((Snapshot $running) -eq $before) 'running fixture unchanged'
 $passed.Add('running game blocks mutation')
@@ -84,13 +93,13 @@ $passed.Add('running game blocks mutation')
 $rollback=Game 'install-rollback';Install-StarSketch $rollback $payload $manager | Out-Null;$before=Snapshot $rollback
 $original=& $module {(Get-Item Function:Commit-StarSketchFile).ScriptBlock}
 & $module {param($body)$script:OriginalCommit=$body;$script:CommitCount=0;function script:Commit-StarSketchFile([string]$Source,[string]$Target){$script:CommitCount++;if($script:CommitCount -eq 3){throw 'fixture install failure'};& $script:OriginalCommit $Source $Target}} $original
-Expect-Failure {Install-StarSketch $rollback $payload $manager} 'injected install fails'
+Expect-Failure {Install-StarSketch $rollback $payload $manager} 'injected install fails' 'SS-INSTALL-032'
 & $module {param($body)Set-Item Function:script:Commit-StarSketchFile -Value $body} $original
 Assert ((Snapshot $rollback) -eq $before) 'install rollback exact'
 $passed.Add('partial install failure restores prior files and manifest')
 $originalMove=& $module {(Get-Item Function:Move-StarSketchFile).ScriptBlock}
 & $module {param($body)$script:OriginalMove=$body;$script:MoveCount=0;function script:Move-StarSketchFile([string]$Source,[string]$Target){$script:MoveCount++;if($script:MoveCount -eq 2){throw 'fixture uninstall failure'};& $script:OriginalMove $Source $Target}} $originalMove
-Expect-Failure {Uninstall-StarSketch $rollback $package} 'injected uninstall fails'
+Expect-Failure {Uninstall-StarSketch $rollback $package} 'injected uninstall fails' 'SS-INSTALL-035'
 & $module {param($body)Set-Item Function:script:Move-StarSketchFile -Value $body} $originalMove
 Assert ((Snapshot $rollback) -eq $before) 'uninstall rollback exact'
 $passed.Add('partial uninstall failure restores files')
@@ -123,7 +132,7 @@ $passed.Add('concurrent file modification preserved')
 # Refuse an asset directory junction rather than writing outside the selected game.
 $linkGame=Game 'junction';$outside=Join-Path $run 'outside-target';Put (Join-Path $outside 'keep.txt') 'outside-keep'
 New-Item -ItemType Junction -Path (Join-Path $linkGame 'StarSketch-assets') -Target $outside | Out-Null
-Expect-Failure {Install-StarSketch $linkGame $payload $manager} 'junction rejected'
+Expect-Failure {Install-StarSketch $linkGame $payload $manager} 'junction rejected' 'SS-INSTALL-001'
 Assert (!(Test-Path -LiteralPath (Join-Path $linkGame 'dxgi.dll'))) 'junction case had no DLL writes'
 Assert ([IO.File]::ReadAllText((Join-Path $outside 'keep.txt')) -eq 'outside-keep') 'junction target preserved'
 $passed.Add('directory junction rejected without following it')
@@ -138,7 +147,7 @@ Uninstall-StarSketch $rollback $installedPackage | Out-Null
 Assert (!(Test-Path -LiteralPath (Join-Path $rollback 'StarSketch-Manager'))) 'self manager removed'
 Remove-Module $installed
 $passed.Add('installed manager uninstalls without original package')
-[ordered]@{date='2026-10-23';tests=$passed.ToArray();result='pass';fixtures=$run} | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $run 'results.json') -Encoding UTF8
+[ordered]@{date='2026-10-24';tests=$passed.ToArray();result='pass';fixtures=$run} | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $run 'results.json') -Encoding UTF8
 Write-Output ('PASS: '+$passed.Count+' installer regression groups')
 $passed | ForEach-Object{Write-Output ('  '+$_)}
 Write-Output ('Fixtures and result: '+$run)

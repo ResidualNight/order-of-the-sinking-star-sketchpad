@@ -1,6 +1,7 @@
 #include "ui.hpp"
 #include <cassert>
 #include <iostream>
+#include <set>
 using namespace sketch;
 int main(){
  // A first opening and every reopening refresh, even with grid/tint hidden or a manual grid.
@@ -32,5 +33,36 @@ int main(){
  refresh.request(false,210);assert(!refresh.ready(449)&&refresh.ready(450));
  refresh.pending=true;refresh.cancel();assert(!refresh.ready(1000)&&!refresh.pending);
  refresh.request(false,1100);assert(refresh.ready(1100));refresh.finish();assert(!refresh.requested);
- std::cout<<"PASS: first open, reopen with hidden/manual grid, resize during localization, mark history scaling, zero-size rejection, manual cancellation and resize debounce\n";
+ // Feedback identifiers stay distinct; a failure must never leave an old automatic grid trusted.
+ std::set<std::string> codes,diagnostics;
+ for(unsigned i=1;i<static_cast<unsigned>(ErrorId::Count);++i){
+  auto id=static_cast<ErrorId>(i);const auto& info=errorInfo(id);
+  assert(codes.insert(info.code).second&&diagnostics.insert(info.diagnostic).second);
+  assert(errorMessage(id).find(std::string("[")+info.code+"] ")==0);
+ }
+ assert(std::string(errorInfo(ErrorId::FreshCameraFrameUnavailable).code)=="SS-GRID-006");
+ assert(std::string(errorInfo(ErrorId::CameraNotFound).code)=="SS-GRID-010");
+ assert(std::string(errorInfo(ErrorId::CameraOrientationInvalid).code)=="SS-GRID-011");
+ App failed;failed.resize(1920,1080);failed.document.add(pin);
+ failed.grid=app.grid;failed.gridEnabled=true;failed.tint=true;
+ failed.gridPlaneOverride=true;failed.gridPlaneZ=1.75f;
+ for(unsigned i=static_cast<unsigned>(ErrorId::UnsupportedGameBuild);i<=static_cast<unsigned>(ErrorId::UnknownGameGrid);++i){
+  auto id=static_cast<ErrorId>(i);failed.gridConfirmed=true;failed.gridFromGame=true;
+  failed.gridRefresh.request();failed.gridRefresh.pending=true;auto origin=failed.grid.origin;
+  failed.rejectGameGrid(id);
+  assert(failed.status==errorMessage(id)&&!failed.gridRefresh.requested&&!failed.gridRefresh.pending);
+  assert(!failed.gridConfirmed&&!failed.gridFromGame&&failed.gridEnabled&&failed.tint);
+  assert(distance(origin,failed.grid.origin)<.001f&&failed.gridPlaneOverride&&failed.gridPlaneZ==1.75f);
+  assert(failed.document.marks.size()==1&&failed.document.nextPin==2);
+  failed.requestGrid();assert(failed.gridRefresh.requested&&failed.status.find("[SS-")==std::string::npos);
+ }
+ failed.rejectGameGrid(ErrorId::None);assert(failed.status==errorMessage(ErrorId::UnknownGameGrid));
+ failed.rejectGameGrid(static_cast<ErrorId>(-1));assert(failed.status==errorMessage(ErrorId::UnknownGameGrid));
+ failed.startManual();assert(failed.manual&&!failed.gridRefresh.requested&&failed.status.find("[SS-")==std::string::npos);
+ assert(failed.document.undo()&&failed.document.marks.empty());assert(failed.document.redo());
+ Detection invalid;failed.acceptDetection(invalid);assert(failed.status==errorMessage(ErrorId::ImageGridUnreliable));
+ Detection candidate;candidate.grid=failed.grid;candidate.grid.confidence=.2f;
+ failed.acceptDetection(candidate);assert(failed.status==errorMessage(ErrorId::ImageGridUnconfirmed)&&!failed.gridConfirmed);
+ candidate.grid.confidence=1;failed.acceptDetection(candidate);assert(failed.gridConfirmed&&failed.status.find("[SS-")==std::string::npos);
+ std::cout<<"PASS: first open, reopen with hidden/manual grid, resize during localization, mark history scaling, zero-size rejection, manual cancellation, resize debounce and coded failure/retry recovery\n";
 }

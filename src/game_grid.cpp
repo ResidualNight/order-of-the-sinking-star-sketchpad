@@ -38,16 +38,16 @@ bool pointerArray(uintptr_t address,int64_t maximum,std::vector<uintptr_t>&out){
 }
 bool GameGridReader::readLevel(){
  // Relative offsets apply only after the exact r67271 executable hash has matched.
- if(!get(image+0xb69600,manager)||!manager){diagnostic="active_entity_manager_unavailable";return false;}
- std::vector<uintptr_t> settings;if(!pointerArray(manager+0xdd0,4,settings)){diagnostic="settings_array_unavailable";return false;}
+ if(!get(image+0xb69600,manager)||!manager)return fail(ErrorId::EntityManagerUnavailable);
+ std::vector<uintptr_t> settings;if(!pointerArray(manager+0xdd0,4,settings))return fail(ErrorId::SettingsArrayUnavailable);
  uintptr_t selected=0;for(auto p:settings){uintptr_t owner=0;if(get(p+240,owner)&&owner==manager&&typeMatches(p,"Settings",1320)){selected=p;break;}}
  struct Gridlike{int64_t x,y,count;uint8_t wrapping,pad[3];int32_t corner[3];}g{};
- if(!selected||!get(selected+816,g)||g.x<1||g.y<1||g.x>2048||g.y>2048||g.count!=g.x*g.y){diagnostic="settings_grid_invalid";return false;}
+ if(!selected||!get(selected+816,g)||g.x<1||g.y<1||g.x>2048||g.y>2048||g.count!=g.x*g.y)return fail(ErrorId::SettingsGridInvalid);
  columns=int(g.x);rows=int(g.y);actors.clear();std::vector<uintptr_t> guys;
  if(pointerArray(manager+0x920,32,guys))for(auto p:guys){uintptr_t owner=0;std::array<float,3>pos{};uint8_t destroyed=0;
   if(get(p+240,owner)&&owner==manager&&typeMatches(p,"Guy",1608)&&get(p,pos)&&get(p+280,destroyed)&&!destroyed&&std::all_of(pos.begin(),pos.end(),[](float v){return std::isfinite(v)&&std::abs(v)<10000;}))actors.push_back(pos);
  }
- if(!heightOverride&&actors.empty()){diagnostic="actor_layer_unavailable";return false;}return true;
+ if(!heightOverride&&actors.empty())return fail(ErrorId::ActorLayerUnavailable);return true;
 }
 void GameGridReader::scan(){
  candidates.clear();lastScan=GetTickCount64();
@@ -63,21 +63,22 @@ void GameGridReader::scan(){
    if(viewport[0]<=0||viewport[1]<=0||std::abs(1.f/viewport[0]-width)>1||std::abs(1.f/viewport[1]-height)>1)continue;
    // Candidate storage lives on the heap so scanning cannot discover our own local copies.
    auto frame=std::make_unique<CameraFrame>();std::memcpy(frame->f.data(),buffer.data()+offset,960);
-   if(validCamera(*frame,width,height))candidates.push_back({low+offset,frame->frame(),frame->f[211]});
+   if(acceptsCamera(*frame))candidates.push_back({low+offset,frame->frame(),frame->f[211]});
   }
  }while(Thread32Next(snapshot,&thread));CloseHandle(snapshot);
 }
 bool GameGridReader::begin(float w,float h,bool overrideHeight,float z){
+ error=ErrorId::None;diagnostic.clear();rejectedCameraOrientation=false;
  width=w;height=h;heightOverride=overrideHeight;forcedZ=z;started=GetTickCount64();
  if(!checked){checked=true;supported=fingerprint();image=reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));}
- if(!supported){diagnostic="unsupported_game_build";return false;}if(!readLevel())return false;
- std::vector<Candidate> live;for(auto c:candidates){auto frame=std::make_unique<CameraFrame>();if(read(c.address,frame->f.data(),960)&&validCamera(*frame,w,h))live.push_back({c.address,frame->frame(),frame->f[211]});}
+ if(!supported)return fail(ErrorId::UnsupportedGameBuild);if(!readLevel())return false;
+ std::vector<Candidate> live;for(auto c:candidates){auto frame=std::make_unique<CameraFrame>();if(read(c.address,frame->f.data(),960)&&acceptsCamera(*frame))live.push_back({c.address,frame->frame(),frame->f[211]});}
  candidates=std::move(live);if(candidates.empty())scan();diagnostic="waiting_for_fresh_camera_frame";return true;
 }
 GameGridState GameGridReader::poll(Grid& grid){
- auto now=GetTickCount64();if(now-started>1800){diagnostic="fresh_camera_frame_unavailable";return GameGridState::Unavailable;}
+ auto now=GetTickCount64();if(now-started>1800){fail(rejectedCameraOrientation?ErrorId::CameraOrientationInvalid:(candidates.empty()?ErrorId::CameraNotFound:ErrorId::FreshCameraFrameUnavailable));return GameGridState::Unavailable;}
  auto best=std::make_unique<CameraFrame>();bool have=false;
- for(auto c:candidates){auto frame=std::make_unique<CameraFrame>();if(!read(c.address,frame->f.data(),960)||!validCamera(*frame,width,height))continue;
+ for(auto c:candidates){auto frame=std::make_unique<CameraFrame>();if(!read(c.address,frame->f.data(),960)||!acceptsCamera(*frame))continue;
   uint32_t advance=frame->frame()-c.frame;float seconds=frame->f[211]-c.time;
   if(!advance||advance>2000||seconds<0||seconds>5)continue;if(!have||int32_t(frame->frame()-best->frame())>0){*best=*frame;have=true;}
  }
@@ -87,10 +88,10 @@ GameGridState GameGridReader::poll(Grid& grid){
    double x=(m[0]*p[0]+m[1]*p[1]+m[2]*p[2]+m[3])/d,y=(m[4]*p[0]+m[5]*p[1]+m[6]*p[2]+m[7])/d;
    double distance=x*x+y*y;if(distance<nearest){nearest=distance;planeZ=p[2];}
   }
-  if(nearest==1e100){diagnostic="visible_actor_layer_unavailable";return GameGridState::Unavailable;}
+  if(nearest==1e100){fail(ErrorId::VisibleActorLayerUnavailable);return GameGridState::Unavailable;}
  }
- uintptr_t activeManager=0;if(!get(image+0xb69600,activeManager)||activeManager!=manager){diagnostic="level_changed_during_localization";return GameGridState::Unavailable;}
- grid=gridFromCamera(*best,width,height,planeZ);if(!grid.usable()){diagnostic="projected_grid_invalid";return GameGridState::Unavailable;}
+ uintptr_t activeManager=0;if(!get(image+0xb69600,activeManager)||activeManager!=manager){fail(ErrorId::LevelChanged);return GameGridState::Unavailable;}
+ grid=gridFromCamera(*best,width,height,planeZ);if(!grid.usable()){fail(ErrorId::ProjectedGridInvalid);return GameGridState::Unavailable;}
  char message[240];std::snprintf(message,sizeof(message),"game_data r67271 frame=%u logical=%dx%d z=%.3f candidates=%zu manager=0x%llx",best->frame(),columns,rows,planeZ,candidates.size(),static_cast<unsigned long long>(manager));diagnostic=message;return GameGridState::Ready;
 }
 }

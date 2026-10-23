@@ -5,6 +5,57 @@
 #include <iostream>
 #include <cassert>
 using namespace sketch;
+namespace {
+CameraFrame reflectedCamera(CameraFrame c,bool horizontal,bool vertical){
+ for(int axis=0;axis<2;axis++)if(axis==0?horizontal:vertical){
+  // Reflect clip-space rows and inverse columns together: these still pass
+  // both inverse-matrix checks that the runtime previously relied on.
+  for(int base:{0,192})for(int col=0;col<4;col++)c.f[base+axis*4+col]*=-1;
+  for(int base:{16,176})for(int row=0;row<4;row++)c.f[base+row*4+axis]*=-1;
+ }
+ return c;
+}
+CameraFrame rotatedCamera(CameraFrame c,float radians){
+ float cosine=std::cos(radians),sine=std::sin(radians);
+ for(int base:{0,160})for(int row=0;row<4;row++){
+  float x=c.f[base+row*4],y=c.f[base+row*4+1];
+  c.f[base+row*4]=cosine*x-sine*y;c.f[base+row*4+1]=sine*x+cosine*y;
+ }
+ for(int col=0;col<4;col++){
+  float x=c.f[16+col],y=c.f[20+col];c.f[16+col]=cosine*x-sine*y;c.f[20+col]=sine*x+cosine*y;
+ }
+ for(int base:{208,212,228,232,236}){
+  float x=c.f[base],y=c.f[base+1];c.f[base]=cosine*x-sine*y;c.f[base+1]=sine*x+cosine*y;
+ }
+ return c;
+}
+CameraFrame resizedCamera(CameraFrame c,float width,float height){
+ float aspectScale=(height/width)/(2160.f/3840.f);
+ for(int base:{0,192})for(int col=0;col<4;col++)c.f[base+col]*=aspectScale;
+ for(int base:{16,176})for(int row=0;row<4;row++)c.f[base+row*4]/=aspectScale;
+ c.f[216]=1/width;c.f[217]=1/height;return c;
+}
+void checkCameraOrientation(const CameraFrame& captured){
+ // World yaw changes individual grid-axis signs; it must not look like a flip.
+ for(float degrees:{-180.f,-90.f,-45.f,0.f,45.f,90.f,180.f})for(Point viewport:std::vector<Point>{{3840,2160},{3200,1800},{1920,1080},{1280,720},{3440,1440}}){
+  auto upright=resizedCamera(rotatedCamera(captured,degrees*3.14159265f/180),viewport.x,viewport.y);
+  assert(validateCamera(upright,viewport.x,viewport.y)==CameraValidation::Valid);
+  for(float layer:{0.f,1.f,1.75f})assert(gridFromCamera(upright,viewport.x,viewport.y,layer).usable());
+  for(int axes=1;axes<=3;axes++){
+   auto reflected=reflectedCamera(upright,(axes&1)!=0,(axes&2)!=0);
+   assert(matrixInverseError(reflected.f.data(),reflected.f.data()+16)<.025f);
+   assert(matrixInverseError(reflected.f.data()+176,reflected.f.data()+192)<.025f);
+   assert(validateCamera(reflected,viewport.x,viewport.y)==CameraValidation::OrientationInvalid);
+   assert(!validCamera(reflected,viewport.x,viewport.y));
+   assert(!gridFromCamera(reflected,viewport.x,viewport.y,1).usable());
+  }
+ }
+ // A broken inverse is invalid data, distinct from a consistent reflected frame.
+ auto corrupt=captured;for(int col=0;col<4;col++)corrupt.f[4+col]*=-1;
+ assert(validateCamera(corrupt,3840,2160)==CameraValidation::Invalid);
+ assert(!validCamera(captured,NAN,2160)&&!validCamera(captured,3840,INFINITY));
+}
+}
 int main(){std::cout.setf(std::ios::unitbuf);
  Document d;Mark s;s.points={{0,0},{100,0}};d.add(s);auto before=d.snapshot();assert(d.eraseCircle({50,0},10));d.record(before);assert(d.marks.size()==2);assert(d.marks[0].points.back().x<40);assert(d.marks[1].points.front().x>60);assert(d.undo());assert(d.marks.size()==1&&d.marks[0].points.size()==2);assert(d.redo());assert(d.marks.size()==2);
  Document f;f.add(s);assert(f.eraseSweep({20,-100},{20,100},4));assert(f.marks.size()==2);
@@ -19,9 +70,10 @@ int main(){std::cout.setf(std::ios::unitbuf);
  assert(distance(dataGrid.snap(direct(3.1f,6.2f,1)),direct(3,6,1))<.002f);
  assert(distance(direct(5,3,1),direct(6,3,1))>distance(direct(5,9,1),direct(6,9,1)));
  auto layer0=gridFromCamera(camera,3840,2160,0);assert(layer0.usable()&&distance(layer0.origin,dataGrid.origin)>10);
+ checkCameraOrientation(camera);
  auto badCamera=camera;badCamera.f[0]=NAN;assert(!validCamera(badCamera,3840,2160));badCamera=camera;badCamera.f[235]=1;assert(!validCamera(badCamera,3840,2160));badCamera=camera;badCamera.f[0]=1e30f;assert(!validCamera(badCamera,3840,2160));
  Image blank;blank.width=640;blank.height=400;blank.rgba.assign(640*400*4,100);assert(!detectGrid(blank).grid.valid);
  Image checker;checker.width=640;checker.height=400;checker.rgba.resize(640*400*4);for(int y=0;y<400;y++)for(int x=0;x<640;x++){int k=(y*640+x)*4;uint8_t c=(x%40<2||y%40<2)?35:180;checker.rgba[k]=checker.rgba[k+1]=checker.rgba[k+2]=c;checker.rgba[k+3]=255;}
  auto found=detectGrid(checker);std::cout<<"synthetic_grid "<<found.grid.valid<<" "<<found.diagnostic<<"\n";assert(found.grid.valid);assert(std::abs(length(found.grid.u)-40)<3&&std::abs(length(found.grid.v)-40)<3);
- std::cout<<"PASS: partial erase, sweep erase, undo/redo, pin numbering, clear, affine and projective snapping, trapezoid fitting, blank rejection, synthetic grid, live camera projection and invalid data rejection\n";
+ std::cout<<"PASS: partial erase, sweep erase, undo/redo, pin numbering, clear, affine and projective snapping, trapezoid fitting, blank rejection, synthetic grid, live camera projection, reflected camera rejection across yaw/viewports and invalid data rejection\n";
 }

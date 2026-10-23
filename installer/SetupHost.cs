@@ -15,7 +15,7 @@ internal static class SetupHost
         try
         {
             string script = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "StarSketch-Setup.ps1");
-            if (!File.Exists(script)) throw new FileNotFoundException("Please extract the complete StarSketch installer ZIP before running it.", script);
+            if (!File.Exists(script)) throw new FileNotFoundException("[SS-INSTALL-037] Please extract the complete StarSketch installer ZIP before running it.", script);
             InitialSessionState settings = InitialSessionState.CreateDefault();
             // This policy belongs to this in-process runspace; no machine/user setting is changed.
             settings.ExecutionPolicy = Microsoft.PowerShell.ExecutionPolicy.Bypass;
@@ -42,7 +42,9 @@ internal static class SetupHost
         }
         catch (Exception error)
         {
-            MessageBox.Show(error.Message, "StarSketch", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            string message = error.Message;
+            if (!System.Text.RegularExpressions.Regex.IsMatch(message, @"^\[SS-(INSTALL|UPDATE)-\d{3}\] ")) message = "[SS-INSTALL-098] " + message;
+            MessageBox.Show(message, "StarSketch", MessageBoxButtons.OK, MessageBoxIcon.Error);
             return 1;
         }
     }

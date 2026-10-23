@@ -43,7 +43,11 @@ void App::resize(float w,float h){
  }
  oldWidth=w;oldHeight=h;
 }
-void App::acceptDetection(const Detection&r){gridRefresh.finish();if(r.grid.usable()&&r.grid.confidence>=.55f){grid=r.grid;gridFromGame=false;gridConfirmed=true;status="已识别网格，请检查格子中心；可随时手动调整";}else if(r.grid.usable()&&!gridConfirmed){grid=r.grid;gridFromGame=false;gridConfirmed=false;status="检测到候选网格，请确认或手动调整；暂不启用吸附";}else{status=gridConfirmed?"自动识别不可靠，保留当前网格；可手动调整":"未能可靠识别网格，请点击调整网格或按 Shift+G";}}
+void App::rejectGameGrid(ErrorId error){
+ gridRefresh.finish();gridConfirmed=false;gridFromGame=false;
+ status=errorMessage(error==ErrorId::None?ErrorId::UnknownGameGrid:error);
+}
+void App::acceptDetection(const Detection&r){gridRefresh.finish();if(r.grid.usable()&&r.grid.confidence>=.55f){grid=r.grid;gridFromGame=false;gridConfirmed=true;status="已识别网格，请检查格子中心；可随时手动调整";}else if(r.grid.usable()&&!gridConfirmed){grid=r.grid;gridFromGame=false;gridConfirmed=false;status=errorMessage(ErrorId::ImageGridUnconfirmed);}else{status=errorMessage(ErrorId::ImageGridUnreliable);if(gridConfirmed)status+="；保留当前网格";}}
 void App::finishGesture(){if(erasing&&eraseChanged)document.record(eraseBefore);erasing=false;eraseChanged=false;}
 void App::drawMark(ImDrawList*dl,const Mark&m,bool preview){if(m.points.empty())return;float alpha=markOpacity*(preview?.65f:1.f);ImU32 ink=faded(m.color,alpha);
  if(m.kind==Kind::Stroke){if(m.points.size()==1)dl->AddCircleFilled(im(m.points[0]),m.width*.5f,ink);else{std::vector<ImVec2> points;for(auto&p:m.points)points.push_back(im(p));dl->AddPolyline(points.data(),int(points.size()),ink,0,m.width);}return;}
@@ -88,7 +92,7 @@ void App::panel(){float s=uiScale;ImGui::SetNextWindowPos({18*s,22*s},ImGuiCond_
 void App::canvas(float w,float h){auto dl=ImGui::GetBackgroundDrawList();drawGrid(dl,w,h);for(auto&m:document.marks)drawMark(dl,m);
  if(!editing)return;auto&io=ImGui::GetIO();Point mouse=pt(io.MousePos);bool overUI=ImGui::IsWindowHovered(ImGuiHoveredFlags_AnyWindow)||ImGui::IsAnyItemActive();bool inside=mouse.x>=0&&mouse.y>=0&&mouse.x<w&&mouse.y<h;
  if(!io.MouseDown[1])finishGesture();
- if(manual){for(size_t i=0;i<calibration.size();i++){dl->AddCircle(im(calibration[i]),7*uiScale,Gold,24,2*uiScale);if(i>0)dl->AddLine(im(calibration[0]),im(calibration[i]),Gold,2*uiScale);}if(!overUI&&inside&&ImGui::IsMouseClicked(0)){calibration.push_back(mouse);if(calibration.size()==size_t(manualPerspective?4:3)){Grid candidate;if(manualPerspective)candidate=Grid::fromQuad(calibration,manualColumns,manualRows);else{candidate.origin=calibration[0];candidate.u=calibration[1]-calibration[0];candidate.v=calibration[2]-calibration[0];candidate.valid=true;candidate.confidence=1;}if(candidate.usable()){grid=candidate;gridConfirmed=true;manual=false;status=manualPerspective?"透视网格已生效，横纵格距随画面远近变化":"三点网格已生效，可分别精调横纵格距";}else{calibration.clear();status="校准点无效，请按提示顺序重新选择";}}}return;}
+ if(manual){for(size_t i=0;i<calibration.size();i++){dl->AddCircle(im(calibration[i]),7*uiScale,Gold,24,2*uiScale);if(i>0)dl->AddLine(im(calibration[0]),im(calibration[i]),Gold,2*uiScale);}if(!overUI&&inside&&ImGui::IsMouseClicked(0)){calibration.push_back(mouse);if(calibration.size()==size_t(manualPerspective?4:3)){Grid candidate;if(manualPerspective)candidate=Grid::fromQuad(calibration,manualColumns,manualRows);else{candidate.origin=calibration[0];candidate.u=calibration[1]-calibration[0];candidate.v=calibration[2]-calibration[0];candidate.valid=true;candidate.confidence=1;}if(candidate.usable()){grid=candidate;gridConfirmed=true;manual=false;status=manualPerspective?"透视网格已生效，横纵格距随画面远近变化":"三点网格已生效，可分别精调横纵格距";}else{calibration.clear();status=errorMessage(ErrorId::InvalidCalibration);}}}return;}
  if(inside&&!overUI&&io.MouseDown[1]){cancelGesture();if(!erasing){eraseBefore=document.snapshot();eraseLast=mouse;erasing=true;eraseChanged=false;}eraseChanged=document.eraseSweep(eraseLast,mouse,eraseRadius*uiScale)||eraseChanged;eraseLast=mouse;}
  if(inside&&!overUI&&!io.MouseDown[1]){
   Point point=(tool!=Kind::Stroke&&gridEnabled&&gridConfirmed)?grid.snap(mouse):mouse;

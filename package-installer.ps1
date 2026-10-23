@@ -1,5 +1,5 @@
 ﻿[CmdletBinding()]
-param([ValidatePattern('^[0-9]+\.[0-9]+\.[0-9]+$')][string]$Version='0.1.2',[string]$RuntimeArchive,[string]$OutputDirectory)
+param([ValidatePattern('^[0-9]+\.[0-9]+\.[0-9]+$')][string]$Version='0.1.3',[string]$RuntimeArchive,[string]$OutputDirectory)
 $ErrorActionPreference='Stop'
 $root=$PSScriptRoot
 if(!$OutputDirectory){$OutputDirectory=Join-Path $root 'dist'}
@@ -28,7 +28,8 @@ try{
  }
 }finally{$source.Dispose()}
 if((Get-FileHash -LiteralPath (Join-Path $payload 'dxgi.dll')).Hash.ToLower() -ne $runtime.dll_sha256){throw 'Runtime DLL hash mismatch.'}
-$known=@($runtime.dll_sha256,'fb767808a0389e543af41d3f9496e849ddeda0a1b8b7c8dbc3fb50fa16828617','d8b4cd185bcb01f37bc9477bedcff5370928d1ad95430df33b279086199c8c29') | Sort-Object -Unique
+# Include the preceding local error-code diagnostic so its owned installation can be updated too.
+$known=@($runtime.dll_sha256,'fb767808a0389e543af41d3f9496e849ddeda0a1b8b7c8dbc3fb50fa16828617','d8b4cd185bcb01f37bc9477bedcff5370928d1ad95430df33b279086199c8c29','9f7bab48c931d01152a328cea80e3f12537750708c4aae5e1f222066505ad575','4a05fdb377c3c1428431e35cf6e1edec3f55b20e799e49ff4c8ccc185aa292d2') | Sort-Object -Unique
 $package=[ordered]@{product='StarSketch';schema=1;version=$Version;known_dll_sha256=@($known);game_exe_sha256=$runtime.game_exe_sha256;files=$files}
 [IO.File]::WriteAllText((Join-Path $payload 'StarSketch-package.json'),($package | ConvertTo-Json -Depth 6),[Text.UTF8Encoding]::new($false))
 foreach($name in @('StarSketch-Setup.ps1','StarSketch.Installer.psm1','StarSketch-安装卸载.cmd')){Copy-Item -LiteralPath (Join-Path $root ('installer\'+$name)) -Destination (Join-Path $stage $name)}

@@ -2,6 +2,7 @@
 #include "core.hpp"
 #include "grid.hpp"
 #include "grid_refresh.hpp"
+#include "errors.hpp"
 #include "imgui.h"
 #include <string>
 namespace sketch {
@@ -17,6 +18,7 @@ public:
  float oldWidth=0,oldHeight=0,uiScale=1;
  void frame(float width,float height);
  void acceptDetection(const Detection& result);
+ void rejectGameGrid(ErrorId error);
  bool setEditing(bool enabled);
  void requestGrid(bool resized=false);
  void finishGesture();

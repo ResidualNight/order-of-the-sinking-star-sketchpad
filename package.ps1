@@ -1,6 +1,6 @@
 ﻿[CmdletBinding()]
 param(
-    [ValidatePattern('^[0-9]+\.[0-9]+\.[0-9]+$')][string]$Version='0.1.2',
+    [ValidatePattern('^[0-9]+\.[0-9]+\.[0-9]+$')][string]$Version='0.1.3',
     [string]$BinaryPath,
     [string]$ToolchainPath,
     [string]$OutputDirectory
