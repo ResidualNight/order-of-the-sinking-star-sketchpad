@@ -39,12 +39,13 @@ try{
   $script:busy=$Busy;$form.UseWaitCursor=$Busy;$pathBox.Enabled=!$Busy
   foreach($b in @($uninstall,$browse,$inspect,$update)){$b.Enabled=!$Busy};$install.Enabled=!$Busy -and $script:hasPayload
  }
- function Show-Failure([string]$Message){$status.Text=Format-StarSketchError $Message;$status.ForeColor=[Drawing.Color]::FromArgb(255,173,160)}
+ function Show-Failure($ErrorValue){$status.Text=Format-StarSketchError $ErrorValue;$status.ForeColor=[Drawing.Color]::FromArgb(255,173,160)}
  function Run-Action([scriptblock]$Action){
   if($script:busy){return};Set-Busy $true
   $status.Text='正在检查和处理，请稍候…';$status.ForeColor=$textColor;[Windows.Forms.Application]::DoEvents()
-  try{$result=& $Action;$status.Text=$result.message;$status.ForeColor=[Drawing.Color]::FromArgb(150,222,172)}catch{Show-Failure $_.Exception.Message}
-  finally{Set-Busy $false}
+  $warnings=@()
+  try{$result=Invoke-Command -ScriptBlock $Action -WarningVariable warnings;$status.Text=$result.message;$status.ForeColor=[Drawing.Color]::FromArgb(150,222,172)}catch{Show-Failure $_.Exception}
+  finally{if($warnings.Count){$status.AppendText("`r`n"+($warnings -join "`r`n"))};Set-Busy $false}
  }
  function Pick-GameDirectory{
   $dialog=[Windows.Forms.FolderBrowserDialog]::new();$dialog.Description='选择沉星之序的安装文件夹（包含 sinking_star.exe）';$dialog.ShowNewFolderButton=$false
@@ -61,7 +62,7 @@ try{
    $ErrorActionPreference='Stop';Import-Module $ModulePath -Force -DisableNameChecking
    if($Operation -eq 'check'){Get-StarSketchUpdate $CurrentVersion}else{Install-StarSketchUpdate $Directory $Offer}
   }).AddArgument((Join-Path $PSScriptRoot 'StarSketch.Installer.psm1')).AddArgument($Operation).AddArgument($script:workerDirectory).AddArgument($CurrentVersion).AddArgument($Offer)
-  try{$script:pending=$script:worker.BeginInvoke();$timer.Start()}catch{$script:worker.Dispose();$script:worker=$null;Set-Busy $false;Show-Failure $_.Exception.Message}
+  try{$script:pending=$script:worker.BeginInvoke();$timer.Start()}catch{$script:worker.Dispose();$script:worker=$null;Set-Busy $false;Show-Failure $_.Exception}
  }
  function Check-Updates{
   if($script:busy){return}
@@ -69,7 +70,7 @@ try{
    $current=$script:package.version
    if(![string]::IsNullOrWhiteSpace($pathBox.Text)){$local=Get-StarSketchStatus $pathBox.Text $script:package;if($local.installed){if($local.version -eq 'manual'){$current=$local.update_version}else{$current=$local.version}}}
    Start-OnlineWork 'check' $current $null
-  }catch{Show-Failure $_.Exception.Message}
+  }catch{Show-Failure $_.Exception}
  }
  function Confirm-Update($Offer){
   $status.Text=$Offer.message;$status.ForeColor=[Drawing.Color]::FromArgb(150,222,172)
@@ -84,17 +85,17 @@ try{
  $timer.Add_Tick({
   if(!$script:worker){$timer.Stop();return}
   if(!$script:pending.IsCompleted){if($script:worker.Streams.Progress.Count){$status.Text=$script:worker.Streams.Progress[$script:worker.Streams.Progress.Count-1].StatusDescription};return}
-  $timer.Stop();$kind=$script:workerKind;$directory=$script:workerDirectory;$failure=$null;$result=$null
+  $timer.Stop();$kind=$script:workerKind;$directory=$script:workerDirectory;$failure=$null;$result=$null;$warnings=@()
   try{$items=@($script:worker.EndInvoke($script:pending));if($script:worker.HadErrors){throw $script:worker.Streams.Error[0].Exception.Message};$result=$items[-1]}
-  catch{$failure=if($script:worker.Streams.Error.Count){$script:worker.Streams.Error[0].Exception.Message}else{$_.Exception.Message}}
-  finally{$script:worker.Dispose();$script:worker=$null;Set-Busy $false}
-  if($failure){Show-Failure $failure;return}
+  catch{$failure=if($script:worker.Streams.Error.Count){$script:worker.Streams.Error[0].Exception}else{$_.Exception}}
+  finally{$warnings=@($script:worker.Streams.Warning | ForEach-Object{$_.Message});$script:worker.Dispose();$script:worker=$null;Set-Busy $false}
+  if($failure){Show-Failure $failure;if($warnings.Count){$status.AppendText("`r`n"+($warnings -join "`r`n"))};return}
   if($kind -eq 'check'){Confirm-Update $result;return}
   try{
    $script:package=Get-StarSketchPackage (Join-Path $directory 'StarSketch-Manager\StarSketch-package.json');$script:hasPayload=$false;$install.Enabled=$false
    $subtitle.Text="《沉星之序》游戏内草稿纸 · $($script:package.version) 测试版 · 已安装管理"
-   $status.Text=$result.message;$status.ForeColor=[Drawing.Color]::FromArgb(150,222,172)
-  }catch{Show-Failure $_.Exception.Message}
+   $status.Text=$result.message;if($warnings.Count){$status.AppendText("`r`n"+($warnings -join "`r`n"))};$status.ForeColor=[Drawing.Color]::FromArgb(150,222,172)
+  }catch{Show-Failure $_.Exception}
  })
  $browse.Add_Click({if(Pick-GameDirectory){Run-Action {Get-StarSketchStatus $pathBox.Text $script:package}}})
  $inspect.Add_Click({Run-Action {Get-StarSketchStatus $pathBox.Text $script:package}})
@@ -104,4 +105,4 @@ try{
  $form.Add_FormClosing({param($sender,$eventArgs)if($script:busy){$eventArgs.Cancel=$true}})
  $form.Add_Shown({Check-Updates})
  [void]$form.ShowDialog();$timer.Dispose();$form.Dispose()
-}catch{$message=if(Get-Command Format-StarSketchError -ErrorAction SilentlyContinue){Format-StarSketchError $_.Exception.Message}else{"[SS-INSTALL-098] $($_.Exception.Message)"};[void][Windows.Forms.MessageBox]::Show($message,'StarSketch 安装工具',[Windows.Forms.MessageBoxButtons]::OK,[Windows.Forms.MessageBoxIcon]::Error);exit 1}
+}catch{$message=if(Get-Command Format-StarSketchError -ErrorAction SilentlyContinue){Format-StarSketchError $_.Exception}else{"[SS-INSTALL-098] $($_.Exception.Message)"};[void][Windows.Forms.MessageBox]::Show($message,'StarSketch 安装工具',[Windows.Forms.MessageBoxButtons]::OK,[Windows.Forms.MessageBoxIcon]::Error);exit 1}

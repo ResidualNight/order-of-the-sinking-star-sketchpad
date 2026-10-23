@@ -6,22 +6,22 @@ An in-game sketchpad for **[Order of the Sinking Star](https://store.steampowere
 
 在游戏画面上自由画线、画箭头、放置连续编号星标，并用半透明棋盘辅助观察。网格直接读取游戏数据和相机透视，保留手动校准。独立制作，非游戏官方组件。
 
-**当前版本：0.1.3 测试版。** 新增图形安装器在线更新、错误编号和网格方向校验。原数据网格路径已在 r67271 / Steam Build 26006400 的 `torc_blocked` 小关卡、3840×2160 实机验证；0.1.3 的新校验以数值回归验证，用户报告的翻转现场尚未实机复现。其他关卡、多层角色、分辨率与图形模组组合尚未全面验证。
+**当前版本：0.1.4 测试版。** 修复安装器回滚备份保留及后台错误编号，补充清理警告显示。原数据网格路径已在 r67271 / Steam Build 26006400 的 `torc_blocked` 小关卡、3840×2160 实机验证；0.1.3 的新校验以数值回归验证，用户报告的翻转现场尚未实机复现。其他关卡、多层角色、分辨率与图形模组组合尚未全面验证。
 
 0.1.2 已验证每次打开自动定位，以及主世界普通斜俯视下 3840×2160 ↔ 3200×1800 的自动刷新；小关卡贴合精度与更多分辨率仍需覆盖。详见验证记录。
 
 ## 下载与安装
 
-**两种安装方式同时提供，任选一种。** 两个 ZIP 内的游戏功能与 DLL 完全相同，均为 0.1.3 测试版，无需安装开发环境。完整下载列表见 [0.1.3 Release](https://github.com/ResidualNight/order-of-the-sinking-star-sketchpad/releases/tag/v0.1.3-test)。
+**两种安装方式同时提供，任选一种。** 两个 ZIP 内的游戏功能与 DLL 完全相同，均为 0.1.4 测试版，无需安装开发环境。完整下载列表见 [0.1.4 Release](https://github.com/ResidualNight/order-of-the-sinking-star-sketchpad/releases/tag/v0.1.4-test)。
 
 | 方式 | 下载文件 | 适合的操作 |
 | --- | --- | --- |
-| 可视化安装 / 更新 / 卸载 | [StarSketch-0.1.3-installer.zip](https://github.com/ResidualNight/order-of-the-sinking-star-sketchpad/releases/download/v0.1.3-test/StarSketch-0.1.3-installer.zip) | 选择游戏文件夹，安装、检查插件更新或卸载 |
-| 直接复制文件与文件夹 | [StarSketch-0.1.3-r67271-test.zip](https://github.com/ResidualNight/order-of-the-sinking-star-sketchpad/releases/download/v0.1.3-test/StarSketch-0.1.3-r67271-test.zip) | 自己将 DLL 和资源文件夹复制到游戏目录 |
+| 可视化安装 / 更新 / 卸载 | [StarSketch-0.1.4-installer.zip](https://github.com/ResidualNight/order-of-the-sinking-star-sketchpad/releases/download/v0.1.4-test/StarSketch-0.1.4-installer.zip) | 选择游戏文件夹，安装、检查插件更新或卸载 |
+| 直接复制文件与文件夹 | [StarSketch-0.1.4-r67271-test.zip](https://github.com/ResidualNight/order-of-the-sinking-star-sketchpad/releases/download/v0.1.4-test/StarSketch-0.1.4-r67271-test.zip) | 自己将 DLL 和资源文件夹复制到游戏目录 |
 
 ### 方式一：可视化安装 / 卸载
 
-1. 保存进度并退出游戏，完整解压 `StarSketch-0.1.3-installer.zip`。
+1. 保存进度并退出游戏，完整解压 `StarSketch-0.1.4-installer.zip`。
 2. 双击 `StarSketch-安装卸载.exe`，也可使用同目录的 `StarSketch-安装卸载.cmd`。
 3. 浏览选择或粘贴游戏安装文件夹，里面应直接包含 `sinking_star.exe`，再点击“安装 / 更新”。
 4. 照常从 Steam 启动游戏，按 **E** 打开草稿纸。
@@ -32,7 +32,7 @@ An in-game sketchpad for **[Order of the Sinking Star](https://store.steampowere
 
 ### 方式二：直接复制文件与文件夹（继续保留）
 
-1. 保存进度并退出游戏，解压 `StarSketch-0.1.3-r67271-test.zip`。
+1. 保存进度并退出游戏，解压 `StarSketch-0.1.4-r67271-test.zip`。
 2. 将包内的 **`dxgi.dll` 和整个 `StarSketch-assets/` 文件夹**复制到 `sinking_star.exe` 同级目录；不要在中间多套一层解压文件夹。
 3. 保留包内的使用说明和 `licenses/`，照常从 Steam 启动游戏，按 **E** 打开草稿纸。
 

@@ -18,7 +18,12 @@ $script:PayloadMap=[ordered]@{
  'licenses/StarSketch-MIT.txt'='StarSketch-assets/licenses/StarSketch-MIT.txt'
 }
 $script:ManagerFiles=@('StarSketch-Setup.ps1','StarSketch.Installer.psm1','StarSketch-安装卸载.cmd','StarSketch-package.json')
-function Format-StarSketchError([string]$Message){
+function Format-StarSketchError($Message){
+ if($Message -is [Exception]){
+  for($cause=$Message;$cause;$cause=$cause.InnerException){if($cause.Message -match '^\[SS-(INSTALL|UPDATE)-\d{3}\] '){return $cause.Message}}
+  $Message=$Message.GetBaseException().Message
+ }
+ $Message=[string]$Message
  if($Message -match '^\[SS-(INSTALL|UPDATE)-\d{3}\] '){return $Message}
  return "[SS-INSTALL-099] $Message"
 }
@@ -217,8 +222,14 @@ function Install-StarSketch([string]$GameDirectory,[string]$PayloadDirectory,[st
   }
  }catch{
   $failure=$_.Exception.Message;$restore=@(Restore-StarSketchChanges $changes)
-  for($i=$created.Count-1;$i -ge 0;$i--){if((Test-Path -LiteralPath $created[$i]) -and @(Get-ChildItem -LiteralPath $created[$i] -Force).Count -eq 0){[IO.Directory]::Delete($created[$i])}}
-  if($restore.Count){$keep=$true;throw "[SS-INSTALL-031] 安装未完成，部分文件无法还原。备份已保留在 $txn。请退出游戏后检查。原错误：$failure"}
+  # Decide backup retention before any optional cleanup can throw. A second
+  # failure must never erase the only remaining copy of an installed file.
+  $keep=$restore.Count -gt 0
+  for($i=$created.Count-1;$i -ge 0;$i--){
+   try{Assert-StarSketchPlainPath $created[$i];if((Test-Path -LiteralPath $created[$i]) -and @(Get-ChildItem -LiteralPath $created[$i] -Force).Count -eq 0){[IO.Directory]::Delete($created[$i])}}
+   catch{Write-Warning "[SS-INSTALL-038] 回滚后的空目录未能清理，已保留：$($created[$i])。原因：$($_.Exception.Message)"}
+  }
+  if($restore.Count){throw "[SS-INSTALL-031] 安装未完成，部分文件无法还原。备份已保留在 $txn。请退出游戏后检查。原错误：$failure"}
   throw "[SS-INSTALL-032] 安装未完成，已还原本次改动。原因：$failure"
  }finally{if(!$keep){try{Remove-StarSketchTransaction $root $txn}catch{Write-Warning "[SS-INSTALL-036] 临时备份保留在 $txn。原因：$($_.Exception.Message)"}}}
  return [pscustomobject]@{version=$package.version;root=$root;message="StarSketch $($package.version) 安装完成。照常启动游戏，按 E 打开草稿纸。`r`n以后可从游戏目录的 StarSketch-Manager 文件夹打开管理工具。"}

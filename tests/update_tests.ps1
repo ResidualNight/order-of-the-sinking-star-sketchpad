@@ -122,6 +122,35 @@ Assert ([IO.File]::ReadAllText((Join-Path $game 'saves\keep.txt')) -eq 'keep') '
 Assert (@(Get-ChildItem -LiteralPath $game -Force -Filter '.StarSketch-transaction-*').Count -eq 0) 'download and transaction staging cleaned'
 Install-StarSketchUpdate $game $offer | Out-Null
 $passed.Add('one-click update installs new version and manager, preserves saves and cleans staging')
+# Match the graphical manager's background runspace and replace its own module.
+$selfGame=Join-Path $run 'self-update-worker';Put (Join-Path $selfGame 'sinking_star.exe') 'MZ-fixture'
+Install-StarSketch $selfGame (Join-Path $oldBundle 'payload') $oldBundle | Out-Null
+$worker=[PowerShell]::Create()
+[void]$worker.AddScript({
+ param($modulePath,$game,$offer,$downloads)
+ $ErrorActionPreference='Stop';$loaded=Import-Module $modulePath -Force -PassThru -DisableNameChecking
+ & $loaded {param($downloads)
+  $script:Downloads=$downloads;$script:RunningGameProbe={$false}
+  function script:Read-StarSketchHttp([string]$Address,[long]$Limit,[string]$Destination){[IO.File]::Copy($script:Downloads[$Address],$Destination,$false)}
+ } $downloads
+ Install-StarSketchUpdate $game $offer
+}).AddArgument((Join-Path $selfGame 'StarSketch-Manager\StarSketch.Installer.psm1')).AddArgument($selfGame).AddArgument($offer).AddArgument($good.downloads)
+try{
+ $pending=$worker.BeginInvoke();$items=@($worker.EndInvoke($pending))
+ Assert (!$worker.HadErrors -and $items[-1].version -eq '0.1.3') 'background self-update completes'
+ Assert ((Hash (Join-Path $selfGame 'dxgi.dll')) -eq (Hash (Join-Path $newBundle 'payload\dxgi.dll'))) 'background self-update installs new DLL'
+ $selfState=Get-Content -LiteralPath (Join-Path $selfGame 'StarSketch-install.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+ foreach($item in $selfState.files){Assert ((Hash (Join-Path $selfGame $item.path)) -eq $item.sha256) ('background ownership '+$item.path)}
+ Assert (@(Get-ChildItem -LiteralPath $selfGame -Force -Filter '.StarSketch-transaction-*').Count -eq 0) 'background self-update cleans transactions'
+}finally{$worker.Dispose()}
+$passed.Add('background runspace passes update offer and safely replaces its own installed manager')
+$worker=[PowerShell]::Create();[void]$worker.AddScript({Write-Warning '[SS-INSTALL-036] fixture retained staging';throw '[SS-UPDATE-001] fixture terminal download failure'})
+$failure=$null
+try{$pending=$worker.BeginInvoke();[void]$worker.EndInvoke($pending)}catch{$failure=Format-StarSketchError $_.Exception}finally{
+ Assert (@($worker.Streams.Warning).Count -eq 1) 'background terminal failure retains warning stream';$worker.Dispose()
+}
+Assert ($failure -and $failure.StartsWith('[SS-UPDATE-001] ')) 'terminal background exception retains actionable error code without wrapper'
+$passed.Add('background terminal exception and cleanup warning retain original identifiers')
 $installedModulePath=Join-Path $game 'StarSketch-Manager\StarSketch.Installer.psm1';Remove-Module $module
 $installed=Import-Module $installedModulePath -Force -PassThru -DisableNameChecking;& $installed {$script:RunningGameProbe={$false}}
 Assert ([bool](Get-Command Get-StarSketchUpdate -ErrorAction SilentlyContinue)) 'installed manager retains online updater'

@@ -41,4 +41,6 @@ Broader level, resolution and multi-layer coverage is still pending.
 
 0.1.3 adds stable error identifiers, rejects reflected/upside-down automatic camera candidates (SS-GRID-011), and adds opt-in one-click online updates after background GitHub checks in both installer and installed manager. Keep release ZIP/receipt names and ownership hashes compatible with the updater. Regression evidence is in `docs/验证记录.md`; the reported live flip has not been reproduced.
 
-The graphical installer and manual-copy player ZIP are both distributed with the v0.1.3-test release and contain the same 0.1.3 runtime. Earlier releases remain available. Online updates require the 0.1.3 manager or later; old 0.1.2 managers first need a full installer update.
+0.1.4 fixes backup retention when rollback and directory cleanup both fail, surfaces cleanup warnings in the GUI, and unwraps background exceptions to retain their original error identifiers. Game behavior is unchanged from 0.1.3; only the runtime version marker changes. Installer regressions include secondary cleanup failure and background self-update.
+
+The graphical installer and manual-copy player ZIP are both distributed with the v0.1.4-test release and contain the same 0.1.4 runtime. Earlier releases remain available. Online updates require the 0.1.3 manager or later; old 0.1.2 managers first need a full installer update.

@@ -129,6 +129,40 @@ Expect-Failure {Install-StarSketch $concurrent $payload $manager} 'concurrent co
 Assert ([IO.File]::ReadAllText($fontTarget) -eq 'concurrent-change') 'concurrent file preserved'
 Assert ((Hash (Join-Path $concurrent 'dxgi.dll')) -eq $known[0]) 'other installed DLL restored'
 $passed.Add('concurrent file modification preserved')
+# A second failure during directory cleanup must not mask rollback status or
+# discard the backups needed when another process changed an installed file.
+$original=& $module {(Get-Item Function:Commit-StarSketchFile).ScriptBlock}
+foreach($externalChange in @($false,$true)){
+ $cleanupGame=Game ('rollback-cleanup-'+$externalChange)
+ Copy-Item -LiteralPath (Join-Path $payload 'dxgi.dll') -Destination (Join-Path $cleanupGame 'dxgi.dll')
+ $before=Snapshot $cleanupGame
+ & $module {param($body,$game,$external)
+  $script:OriginalCommit=$body;$script:CleanupGame=$game;$script:ExternalChange=$external;$script:CommitCount=0;$script:FailCleanup=$false
+  function script:Commit-StarSketchFile([string]$Source,[string]$Target){
+   $script:CommitCount++
+   if($script:CommitCount -eq 3){$script:FailCleanup=$true;if($script:ExternalChange){[IO.File]::WriteAllText((Join-Path $script:CleanupGame 'dxgi.dll'),'concurrent rollback change')};throw 'fixture commit failure before cleanup'}
+   & $script:OriginalCommit $Source $Target
+  }
+  function script:Get-ChildItem([string]$LiteralPath,[switch]$Force,[switch]$Recurse){
+   if($script:FailCleanup -and $LiteralPath -eq (Join-Path $script:CleanupGame 'StarSketch-assets')){throw [UnauthorizedAccessException]::new('fixture directory cleanup denied')}
+   Microsoft.PowerShell.Management\Get-ChildItem -LiteralPath $LiteralPath -Force:$Force -Recurse:$Recurse
+  }
+ } $original $cleanupGame $externalChange
+ $warnings=@();$failure=$null
+ try{Invoke-Command -ScriptBlock {Install-StarSketch $cleanupGame $payload $manager} -WarningVariable warnings | Out-Null}catch{$failure=$_.Exception.Message}finally{
+  & $module {param($body)Set-Item Function:script:Commit-StarSketchFile -Value $body;Remove-Item Function:script:Get-ChildItem} $original
+ }
+ $code=if($externalChange){'SS-INSTALL-031'}else{'SS-INSTALL-032'}
+ Assert ($failure -and $failure.StartsWith("[$code] ")) 'cleanup exception preserves rollback error identifier'
+ Assert (@($warnings | Where-Object {[string]$_ -like '[[]SS-INSTALL-038[]] *'}).Count -eq 1) 'cleanup warning captured for graphical result'
+ $backups=@(Get-ChildItem -LiteralPath $cleanupGame -Force -Filter '.StarSketch-transaction-*')
+ if($externalChange){
+  Assert ([IO.File]::ReadAllText((Join-Path $cleanupGame 'dxgi.dll')) -eq 'concurrent rollback change') 'rollback does not overwrite concurrent change'
+  Assert ($backups.Count -eq 1) 'failed rollback retains transaction despite cleanup exception'
+  Assert ((Hash (Join-Path $backups[0].FullName 'old-0')) -eq $known[0]) 'original DLL backup retained intact'
+ }else{Assert ($backups.Count -eq 0 -and (Snapshot $cleanupGame) -eq $before) 'successful rollback cleans backup despite empty-directory failure'}
+}
+$passed.Add('cleanup exception preserves rollback identifiers, warnings and recovery backups')
 # Refuse an asset directory junction rather than writing outside the selected game.
 $linkGame=Game 'junction';$outside=Join-Path $run 'outside-target';Put (Join-Path $outside 'keep.txt') 'outside-keep'
 New-Item -ItemType Junction -Path (Join-Path $linkGame 'StarSketch-assets') -Target $outside | Out-Null
