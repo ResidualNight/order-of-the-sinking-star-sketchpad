@@ -12,6 +12,7 @@
 #include "ui.hpp"
 #include "ui_glyphs.hpp"
 #include "game_grid.hpp"
+#include "preferences.hpp"
 #include <atomic>
 #include <mutex>
 #include <map>
@@ -24,11 +25,11 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND,UINT,WPARAM,LP
 namespace {
 template<class T>struct Com{T*p=nullptr;~Com(){reset();}Com()=default;Com(const Com&)=delete;Com&operator=(const Com&)=delete;Com(Com&&b)noexcept:p(b.p){b.p=nullptr;}Com&operator=(Com&&b)noexcept{reset();p=b.p;b.p=nullptr;return*this;}void reset(){if(p){p->Release();p=nullptr;}}T**put(){reset();return&p;}T*operator->()const{return p;}operator bool()const{return p!=nullptr;}};
 HMODULE ownModule=nullptr,realDxgi=nullptr;std::recursive_mutex renderMutex;std::mutex hookMutex;std::map<void**,void*> originals;
-ULONGLONG lastMouseMessage[3]{};std::atomic<bool> editing{false};HIMC savedImeContext=nullptr;bool imeDetached=false;sketch::App app;sketch::GameGridReader gameGrid;WNDPROC previousWndProc=nullptr;HWND gameWindow=nullptr;
+ULONGLONG lastMouseMessage[3]{};std::atomic<bool> editing{false};HIMC savedImeContext=nullptr;bool imeDetached=false;sketch::App app;sketch::GameGridReader gameGrid;sketch::PreferenceStore preferences;WNDPROC previousWndProc=nullptr;HWND gameWindow=nullptr;
 std::wstring basePath(){wchar_t buffer[32768];DWORD n=GetModuleFileNameW(ownModule,buffer,32768);std::wstring path(buffer,n);return path.substr(0,path.find_last_of(L"\\/")+1);}
 void log(const char*fmt,...){char line[2048];va_list args;va_start(args,fmt);vsnprintf(line,sizeof(line),fmt,args);va_end(args);std::wstring path=basePath()+L"StarSketch.log";HANDLE file=CreateFileW(path.c_str(),FILE_APPEND_DATA,FILE_SHARE_READ|FILE_SHARE_WRITE,nullptr,OPEN_ALWAYS,FILE_ATTRIBUTE_NORMAL,nullptr);if(file!=INVALID_HANDLE_VALUE){DWORD done;WriteFile(file,line,(DWORD)strlen(line),&done,nullptr);WriteFile(file,"\r\n",2,&done,nullptr);CloseHandle(file);}}
 void require(HRESULT hr,const char*what){if(FAILED(hr)){log("[SS-DX12-001] %s: HRESULT=0x%08lx",what,(unsigned long)hr);throw std::runtime_error(what);}}
-void systemDxgi(){static std::once_flag once;std::call_once(once,[]{wchar_t path[MAX_PATH];GetSystemDirectoryW(path,MAX_PATH);wcscat_s(path,L"\\dxgi.dll");realDxgi=LoadLibraryW(path);log("StarSketch 0.1.4 | independent DX12 overlay | system DXGI loaded=%d",realDxgi!=nullptr);});}
+void systemDxgi(){static std::once_flag once;std::call_once(once,[]{wchar_t path[MAX_PATH];GetSystemDirectoryW(path,MAX_PATH);wcscat_s(path,L"\\dxgi.dll");realDxgi=LoadLibraryW(path);log("StarSketch 0.2.0 | independent DX12 overlay | system DXGI loaded=%d",realDxgi!=nullptr);});}
 template<class T>T real(const char*name){systemDxgi();return reinterpret_cast<T>(GetProcAddress(realDxgi,name));}
 void patch(void**slot,void*replacement){DWORD old;if(!VirtualProtect(slot,sizeof(void*),PAGE_READWRITE,&old))throw std::runtime_error("VirtualProtect");InterlockedExchangePointer(slot,replacement);DWORD ignored;VirtualProtect(slot,sizeof(void*),old,&ignored);}
 void hook(void*object,size_t index,void*replacement){void**slot=(*reinterpret_cast<void***>(object))+index;std::lock_guard<std::mutex>lock(hookMutex);if(originals.count(slot))return;originals[slot]=*slot;patch(slot,replacement);}
@@ -36,14 +37,14 @@ template<class T>T original(void*object,size_t index){std::lock_guard<std::mutex
 void setEditing(bool enabled){
  if(editing.exchange(enabled)==enabled)return;
  app.setEditing(enabled);
+ if(!enabled){auto error=preferences.update(app,sketch::GridRefresh::now(),true);if(error!=sketch::ErrorId::None)log("%s",sketch::errorMessage(error).c_str());}
  ClipCursor(nullptr);if(ImGui::GetCurrentContext())ImGui::GetIO().MouseDrawCursor=enabled;log("Drawing mode %s",enabled?"ON":"OFF");
 }
 void pollKeyboard(){
- static bool previous[256]{};bool foreground=GetForegroundWindow()==gameWindow;SHORT e=GetAsyncKeyState('E');bool eDown=(e&0x8000)!=0;bool ctrl=(GetAsyncKeyState(VK_CONTROL)&0x8000)!=0,alt=(GetAsyncKeyState(VK_MENU)&0x8000)!=0,shift=(GetAsyncKeyState(VK_SHIFT)&0x8000)!=0;
- if(foreground&&!ctrl&&!alt&&!previous['E']&&(eDown||(e&1)))setEditing(!editing.load());previous['E']=eDown;
- struct Key{int vk;ImGuiKey key;};static Key keys[]={{'B',ImGuiKey_B},{'A',ImGuiKey_A},{'P',ImGuiKey_P},{'G',ImGuiKey_G},{'T',ImGuiKey_T},{'C',ImGuiKey_C},{'Z',ImGuiKey_Z},{'Y',ImGuiKey_Y},{VK_ESCAPE,ImGuiKey_Escape}};
+ static bool previous[256]{};bool foreground=GetForegroundWindow()==gameWindow;bool ctrl=(GetAsyncKeyState(VK_CONTROL)&0x8000)!=0,alt=(GetAsyncKeyState(VK_MENU)&0x8000)!=0,shift=(GetAsyncKeyState(VK_SHIFT)&0x8000)!=0;
  auto&io=ImGui::GetIO();io.AddKeyEvent(ImGuiMod_Ctrl,foreground&&ctrl);io.AddKeyEvent(ImGuiMod_Alt,foreground&&alt);io.AddKeyEvent(ImGuiMod_Shift,foreground&&shift);
- for(auto k:keys){SHORT state=GetAsyncKeyState(k.vk);bool down=foreground&&(state&0x8000);if(foreground&&editing.load()&&!previous[k.vk]&&!down&&(state&1)){io.AddKeyEvent(k.key,true);io.AddKeyEvent(k.key,false);}else io.AddKeyEvent(k.key,down);previous[k.vk]=down;} static bool mousePrevious[3]{};int mouseKeys[]={VK_LBUTTON,VK_RBUTTON,VK_MBUTTON};for(int button=0;button<3;button++){SHORT state=GetAsyncKeyState(mouseKeys[button]);bool down=foreground&&(state&0x8000);if(GetTickCount64()-lastMouseMessage[button]<200){mousePrevious[button]=down;continue;}if(foreground&&editing.load()&&!mousePrevious[button]&&!down&&(state&1)){io.AddMouseButtonEvent(button,true);io.AddMouseButtonEvent(button,false);}else io.AddMouseButtonEvent(button,down);mousePrevious[button]=down;}
+ io.AddKeyEvent(ImGuiMod_Super,foreground&&((GetAsyncKeyState(VK_LWIN)|GetAsyncKeyState(VK_RWIN))&0x8000));
+ for(auto k:sketch::KeyboardKeys){SHORT state=GetAsyncKeyState(k.vk);bool down=foreground&&(state&0x8000);if(foreground&&!previous[k.vk]&&!down&&(state&1)){io.AddKeyEvent(k.key,true);io.AddKeyEvent(k.key,false);}else io.AddKeyEvent(k.key,down);previous[k.vk]=down;} static bool mousePrevious[3]{};int mouseKeys[]={VK_LBUTTON,VK_RBUTTON,VK_MBUTTON};for(int button=0;button<3;button++){SHORT state=GetAsyncKeyState(mouseKeys[button]);bool down=foreground&&(state&0x8000);if(GetTickCount64()-lastMouseMessage[button]<200){mousePrevious[button]=down;continue;}if(foreground&&editing.load()&&!mousePrevious[button]&&!down&&(state&1)){io.AddMouseButtonEvent(button,true);io.AddMouseButtonEvent(button,false);}else io.AddMouseButtonEvent(button,down);mousePrevious[button]=down;}
 }
 void saveDiagnosticCapture(const sketch::Image&image){wchar_t directory[32768];DWORD length=GetEnvironmentVariableW(L"STARSKETCH_CAPTURE_DIR",directory,32768);if(!length||length>=32768)return;std::wstring path=std::wstring(directory,length)+L"\\game-grid-capture.bmp";HANDLE file=CreateFileW(path.c_str(),GENERIC_WRITE,FILE_SHARE_READ,nullptr,CREATE_ALWAYS,FILE_ATTRIBUTE_NORMAL,nullptr);if(file==INVALID_HANDLE_VALUE)return;
  BITMAPFILEHEADER fh{};BITMAPINFOHEADER ih{};fh.bfType=0x4d42;fh.bfOffBits=sizeof(fh)+sizeof(ih);fh.bfSize=fh.bfOffBits+DWORD(image.rgba.size());ih.biSize=sizeof(ih);ih.biWidth=image.width;ih.biHeight=-image.height;ih.biPlanes=1;ih.biBitCount=32;ih.biCompression=BI_RGB;DWORD done;WriteFile(file,&fh,sizeof(fh),&done,nullptr);WriteFile(file,&ih,sizeof(ih),&done,nullptr);std::vector<uint8_t>row(image.width*4);for(int y=0;y<image.height;y++){for(int x=0;x<image.width;x++){auto p=&image.rgba[(y*image.width+x)*4];row[x*4]=p[2];row[x*4+1]=p[1];row[x*4+2]=p[0];row[x*4+3]=255;}WriteFile(file,row.data(),DWORD(row.size()),&done,nullptr);}CloseHandle(file);
@@ -56,7 +57,7 @@ void hookGameInput(){auto module=(uint8_t*)GetModuleHandleW(nullptr);auto dos=(I
  struct Entry{const char*name;void*fn;};Entry entries[]={{"GetAsyncKeyState",(void*)blockedAsync},{"GetKeyState",(void*)blockedKey},{"GetKeyboardState",(void*)blockedKeyboard},{"GetRawInputData",(void*)blockedRaw},{"ClipCursor",(void*)blockedClip},{"SetCursorPos",(void*)blockedPosition}};
  for(auto desc=(IMAGE_IMPORT_DESCRIPTOR*)(module+dir.VirtualAddress);desc->Name;++desc){if(_stricmp((char*)module+desc->Name,"USER32.dll")!=0||!desc->OriginalFirstThunk)continue;auto names=(IMAGE_THUNK_DATA64*)(module+desc->OriginalFirstThunk);auto slots=(IMAGE_THUNK_DATA64*)(module+desc->FirstThunk);for(;names->u1.AddressOfData;++names,++slots){if(IMAGE_SNAP_BY_ORDINAL64(names->u1.Ordinal))continue;const char*name=(char*)((IMAGE_IMPORT_BY_NAME*)(module+names->u1.AddressOfData))->Name;for(auto&e:entries)if(strcmp(name,e.name)==0){patch((void**)&slots->u1.Function,e.fn);log("Input interception: %s",name);}}}
 }
-bool polledKey(WPARAM key){switch(key){case 'E':case 'B':case 'A':case 'P':case 'G':case 'T':case 'C':case 'Z':case 'Y':case VK_ESCAPE:case VK_CONTROL:case VK_LCONTROL:case VK_RCONTROL:case VK_MENU:case VK_LMENU:case VK_RMENU:case VK_SHIFT:case VK_LSHIFT:case VK_RSHIFT:return true;default:return false;}}
+bool polledKey(WPARAM key){for(auto k:sketch::KeyboardKeys)if(key==WPARAM(k.vk))return true;switch(key){case VK_CONTROL:case VK_LCONTROL:case VK_RCONTROL:case VK_MENU:case VK_LMENU:case VK_RMENU:case VK_SHIFT:case VK_LSHIFT:case VK_RSHIFT:case VK_LWIN:case VK_RWIN:return true;default:return false;}}
 bool polledButton(UINT message){return message==WM_LBUTTONDOWN||message==WM_LBUTTONUP||message==WM_LBUTTONDBLCLK||message==WM_RBUTTONDOWN||message==WM_RBUTTONUP||message==WM_RBUTTONDBLCLK||message==WM_MBUTTONDOWN||message==WM_MBUTTONUP||message==WM_MBUTTONDBLCLK;}
 constexpr UINT DisableGameImeMessage=WM_APP+0x31a;
 void disableGameIme(HWND window){if(imeDetached)return;HIMC context=ImmGetContext(window);if(context){ImmNotifyIME(context,NI_COMPOSITIONSTR,CPS_CANCEL,0);ImmReleaseContext(window,context);}savedImeContext=ImmAssociateContext(window,nullptr);imeDetached=true;log("IME disabled for game window only");}
@@ -65,6 +66,7 @@ LRESULT CALLBACK windowProc(HWND window,UINT message,WPARAM wparam,LPARAM lparam
  if(message==WM_NCDESTROY&&imeDetached){ImmAssociateContext(window,savedImeContext);imeDetached=false;}
 
  bool active=editing.load();
+ if(message==WM_CLOSE){std::lock_guard<std::recursive_mutex>lock(renderMutex);auto error=preferences.update(app,sketch::GridRefresh::now(),true);if(error!=sketch::ErrorId::None)log("%s",sketch::errorMessage(error).c_str());}
  if(message==WM_KILLFOCUS){std::lock_guard<std::recursive_mutex>lock(renderMutex);setEditing(false);}
  {std::lock_guard<std::recursive_mutex>lock(renderMutex);if(ImGui::GetCurrentContext()){bool keyboardMessage=message==WM_KEYDOWN||message==WM_KEYUP||message==WM_SYSKEYDOWN||message==WM_SYSKEYUP;if(polledButton(message)){int button=(message==WM_LBUTTONDOWN||message==WM_LBUTTONUP||message==WM_LBUTTONDBLCLK)?0:((message==WM_RBUTTONDOWN||message==WM_RBUTTONUP||message==WM_RBUTTONDBLCLK)?1:2);lastMouseMessage[button]=GetTickCount64();}if(!(keyboardMessage&&polledKey(wparam))&&(!polledButton(message)||active))ImGui_ImplWin32_WndProcHandler(window,message,wparam,lparam);}}
  if(active){if(message==WM_INPUT)return DefWindowProcW(window,message,wparam,lparam);if((message>=WM_MOUSEFIRST&&message<=WM_MOUSELAST)||(message>=WM_KEYFIRST&&message<=WM_KEYLAST)||message==WM_CHAR)return 0;if(message==WM_SETCURSOR)return TRUE;}
@@ -80,6 +82,8 @@ public:
  void bind(IDXGISwapChain*swap,IUnknown*unknown){Com<ID3D12CommandQueue>candidate;if(FAILED(unknown->QueryInterface(__uuidof(ID3D12CommandQueue),(void**)candidate.put())))return;Com<IDXGISwapChain3>chain;if(FAILED(swap->QueryInterface(__uuidof(IDXGISwapChain3),(void**)chain.put())))return;std::lock_guard<std::recursive_mutex>lock(renderMutex);if(target==chain.p)return;if(initialized)releaseBuffers();target=chain.p;queue=std::move(candidate);disabled=false;log("D3D12 swapchain attached");}
  bool init(IDXGISwapChain3*swap){DXGI_SWAP_CHAIN_DESC desc{};require(swap->GetDesc(&desc),"swapchain desc");if(desc.BufferCount<2||!desc.OutputWindow)return false;require(swap->GetDevice(__uuidof(ID3D12Device),(void**)device.put()),"D3D12 device");format=desc.BufferDesc.Format;
   if(!context){IMGUI_CHECKVERSION();ImGui::CreateContext();auto&io=ImGui::GetIO();io.IniFilename=nullptr;io.LogFilename=nullptr;std::wstring fontPath=basePath()+L"StarSketch-assets\\NotoSerifSC.ttf";int n=WideCharToMultiByte(CP_UTF8,0,fontPath.c_str(),-1,nullptr,0,nullptr,nullptr);std::string utf(n,'\0');WideCharToMultiByte(CP_UTF8,0,fontPath.c_str(),-1,utf.data(),n,nullptr,nullptr);static ImVector<ImWchar> glyphRanges;ImFontGlyphRangesBuilder glyphBuilder;glyphBuilder.AddRanges(io.Fonts->GetGlyphRangesChineseSimplifiedCommon());glyphBuilder.AddText(sketch::UiGlyphs);for(const auto& error:sketch::Errors)glyphBuilder.AddText(error.message);glyphBuilder.BuildRanges(&glyphRanges);if(!io.Fonts->AddFontFromFileTTF(utf.c_str(),32,nullptr,glyphRanges.Data))throw std::runtime_error("Chinese font missing");
+   static const ImWchar digits[]={0x30,0x39,0};ImFontConfig numberConfig;numberConfig.RasterizerMultiply=1.3f;app.numberFont=io.Fonts->AddFontFromFileTTF(utf.c_str(),96,&numberConfig,digits);if(!app.numberFont)throw std::runtime_error("Number font missing");
+   auto preferenceError=preferences.load(app);if(preferenceError!=sketch::ErrorId::None)log("%s",sketch::errorMessage(preferenceError).c_str());
    ImGui::StyleColorsDark();auto&style=ImGui::GetStyle();style.WindowRounding=7;style.FrameRounding=3;style.WindowBorderSize=1;style.Colors[ImGuiCol_WindowBg]={.035f,.055f,.085f,.96f};style.Colors[ImGuiCol_Border]={.64f,.51f,.27f,.9f};style.Colors[ImGuiCol_Button]={.18f,.20f,.23f,1};style.Colors[ImGuiCol_ButtonHovered]={.34f,.30f,.20f,1};style.Colors[ImGuiCol_FrameBg]={.12f,.16f,.21f,1};style.Colors[ImGuiCol_SliderGrab]={.76f,.61f,.32f,1};style.Colors[ImGuiCol_Text]={.87f,.84f,.73f,1};
    ImGui_ImplWin32_Init(desc.OutputWindow);gameWindow=desc.OutputWindow;previousWndProc=(WNDPROC)SetWindowLongPtrW(gameWindow,GWLP_WNDPROC,(LONG_PTR)windowProc);if(!previousWndProc)throw std::runtime_error("window subclass failed");hookGameInput();context=true;PostMessageW(gameWindow,DisableGameImeMessage,0,0);log("UI initialized; keyboard E toggles drawing");}
   D3D12_DESCRIPTOR_HEAP_DESC hd{};hd.Type=D3D12_DESCRIPTOR_HEAP_TYPE_RTV;hd.NumDescriptors=desc.BufferCount;require(device->CreateDescriptorHeap(&hd,__uuidof(ID3D12DescriptorHeap),(void**)rtvHeap.put()),"RTV heap");hd.Type=D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;hd.NumDescriptors=2;hd.Flags=D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;require(device->CreateDescriptorHeap(&hd,__uuidof(ID3D12DescriptorHeap),(void**)srvHeap.put()),"SRV heap");frames.resize(desc.BufferCount);UINT step=device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);auto handle=rtvHeap->GetCPUDescriptorHandleForHeapStart();
@@ -113,6 +117,10 @@ public:
    renderWidth=desc.Width;renderHeight=desc.Height;
    ImGui_ImplDX12_NewFrame();ImGui_ImplWin32_NewFrame();ImGui::NewFrame();
    auto&io=ImGui::GetIO();app.resize(io.DisplaySize.x,io.DisplaySize.y);
+   auto levelTime=sketch::GridRefresh::now();if(app.levelWatch.due(levelTime)){
+    sketch::LevelIdentity identity;bool available=gameGrid.readCurrentLevel(identity);
+    if(app.observeLevel(available?&identity:nullptr,levelTime))log("Level change confirmed: logical=%dx%d auto_clear=%d",identity.columns,identity.rows,app.autoClearOnLevel?1:0);
+   }
    auto&refresh=app.gridRefresh;
    if(refresh.ready()){
     if(!refresh.pending){
@@ -134,7 +142,10 @@ public:
      }
     }
    }
-   app.editing=editing.load();app.frame(io.DisplaySize.x,io.DisplaySize.y);
+   bool settingsWereOpen=app.settingsOpen;app.editing=editing.load();app.frame(io.DisplaySize.x,io.DisplaySize.y);
+   auto preferenceError=preferences.update(app,sketch::GridRefresh::now(),settingsWereOpen&&!app.settingsOpen);if(preferenceError!=sketch::ErrorId::None)log("%s",sketch::errorMessage(preferenceError).c_str());
+   if(app.editing!=editing.load())setEditing(app.editing);
+   if(app.inputError!=sketch::ErrorId::None){log("%s | %s",sketch::errorMessage(app.inputError).c_str(),app.bindingStatus.c_str());app.inputError=sketch::ErrorId::None;}
    if(app.wantExit){app.wantExit=false;setEditing(false);}ImGui::Render();
    barrier(f.buffer.p,D3D12_RESOURCE_STATE_PRESENT,D3D12_RESOURCE_STATE_RENDER_TARGET);commands->OMSetRenderTargets(1,&f.rtv,FALSE,nullptr);ID3D12DescriptorHeap*heap=srvHeap.p;commands->SetDescriptorHeaps(1,&heap);ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(),commands.p);barrier(f.buffer.p,D3D12_RESOURCE_STATE_RENDER_TARGET,D3D12_RESOURCE_STATE_PRESENT);require(commands->Close(),"frame close");ID3D12CommandList*list=commands.p;queue->ExecuteCommandLists(1,&list);require(queue->Signal(fence.p,++value),"frame signal");f.fenceValue=value;
   }catch(const std::exception&e){disabled=true;editing.store(false);ClipCursor(nullptr);log("[SS-DX12-002] Overlay disabled after error: %s",e.what());}

@@ -6,6 +6,7 @@ if(!$WorkRoot){$WorkRoot=Join-Path $root 'work\update-tests'}
 $run=Join-Path $WorkRoot ([guid]::NewGuid().ToString('N'));[IO.Directory]::CreateDirectory($run) | Out-Null
 Add-Type -AssemblyName System.IO.Compression;Add-Type -AssemblyName System.IO.Compression.FileSystem
 $module=Import-Module (Join-Path $root 'installer\StarSketch.Installer.psm1') -Force -PassThru -DisableNameChecking
+$httpReader=& $module {(Get-Item Function:Read-StarSketchHttp).ScriptBlock}
 & $module {$script:RunningGameProbe={$false}}
 function Assert([bool]$Condition,[string]$Message){if(!$Condition){throw "FAIL: $Message"}}
 function Failure([scriptblock]$Action,[string]$Code){$message=$null;try{& $Action | Out-Null}catch{$message=$_.Exception.Message};Assert ($message -and $message.StartsWith("[$Code] ")) ("expected $Code, got $message")}
@@ -53,9 +54,13 @@ function Configure($Data){
  $json=ConvertTo-Json -InputObject @($Data.release) -Depth 9 -Compress
  & $module {param($json,$downloads)
   $script:MockJson=$json;$script:MockDownloads=$downloads;$script:DownloadCount=0;$script:NetworkFailure=$false;$script:StartGameOnDownload=$false
-  function script:Read-StarSketchHttp([string]$Address,[long]$Limit,[string]$Destination){
+  $script:ApiFailure=$null;$script:MockFeed=$null;$script:FeedReads=0;$script:HeadCount=0;$script:HeadSize=$null
+  function script:Read-StarSketchHttp([string]$Address,[long]$Limit,[string]$Destination,[switch]$Head){
    if($script:NetworkFailure){throw '[SS-UPDATE-001] injected network failure'}
    Assert-StarSketchUpdateUri $Address
+   if($Address -ceq $script:ReleaseApi -and $script:ApiFailure){throw $script:ApiFailure}
+   if($Address -ceq $script:ReleaseFeed){$script:FeedReads++;return $script:MockFeed}
+   if($Head){$script:HeadCount++;if($null -ne $script:HeadSize){return $script:HeadSize};return (Get-Item -LiteralPath $script:MockDownloads[$Address]).Length}
    if(!$Destination){return $script:MockJson}
    $script:DownloadCount++;[IO.File]::Copy($script:MockDownloads[$Address],$Destination,$false)
    if($script:StartGameOnDownload -and $Address.EndsWith('.zip')){$script:RunningGameProbe={$true}}
@@ -79,6 +84,82 @@ Configure $good;& $module {$parsed=$script:MockJson | ConvertFrom-Json;$parsed[0
 Configure $good;& $module {$parsed=$script:MockJson | ConvertFrom-Json;$parsed[0].assets[0].size=129MB;$script:MockJson=ConvertTo-Json -InputObject @($parsed[0]) -Depth 9 -Compress};Failure {Get-StarSketchUpdate '0.1.2'} 'SS-UPDATE-011'
 Assert ((Format-StarSketchError '[SS-UPDATE-006] fixture') -eq '[SS-UPDATE-006] fixture') 'update identifier retained'
 $passed.Add('offline, malformed JSON, missing assets, foreign URL, size bounds and error identifiers')
+# Exercise the actual HTTP error catch, including PowerShell's GetResponse wrapper.
+Add-Type -TypeDefinition @'
+using System;
+using System.Net;
+public sealed class StarSketchErrorResponse : WebResponse {
+ public int StatusCode;
+ public bool Closed;
+ private WebHeaderCollection headers = new WebHeaderCollection();
+ public override WebHeaderCollection Headers { get { return headers; } }
+ public override void Close() { Closed = true; }
+}
+public sealed class StarSketchErrorRequest {
+ public string UserAgent, Accept, Method;
+ public int Timeout, ReadWriteTimeout, MaximumAutomaticRedirections;
+ public StarSketchErrorResponse Response;
+ public WebResponse GetResponse() { throw new WebException("fixture", null, WebExceptionStatus.ProtocolError, Response); }
+}
+'@
+& $module {param($body)
+ Set-Item Function:script:Read-StarSketchHttp -Value $body
+ function script:New-StarSketchHttpRequest([string]$Address){$request=[StarSketchErrorRequest]::new();$request.Response=$script:ErrorResponse;return $request}
+} $httpReader
+foreach($case in @(@{status=403;remaining='0';code='SS-UPDATE-013'},@{status=429;remaining='';code='SS-UPDATE-013'},@{status=403;remaining='12';code='SS-UPDATE-014'},@{status=404;remaining='';code='SS-UPDATE-001'})){
+ & $module {param($case)
+  $script:ErrorResponse=[StarSketchErrorResponse]::new();$script:ErrorResponse.StatusCode=$case.status
+  $script:ErrorResponse.Headers['X-RateLimit-Remaining']=$case.remaining;$script:ErrorResponse.Headers['X-RateLimit-Reset']='1792904127'
+ } $case
+ Failure {& $module {Read-StarSketchHttp $script:ReleaseApi 4MB}} $case.code
+ Assert (& $module {$script:ErrorResponse.Closed}) 'HTTP error response disposed'
+}
+& $module {function script:New-StarSketchHttpRequest([string]$Address){[Net.HttpWebRequest]::Create($Address)}}
+$passed.Add('HTTP 403 quota, other 403, 429 and 404 classified through GetResponse wrapper and disposed')
+function Feed([string[]]$Tags){
+ $entries=foreach($tag in $Tags){'<entry><link rel="alternate" href="https://github.com/ResidualNight/order-of-the-sinking-star-sketchpad/releases/tag/'+$tag+'"/></entry>'}
+ return '<feed xmlns="http://www.w3.org/2005/Atom">'+($entries -join '')+'</feed>'
+}
+function ConfigureFeed([string]$Code='SS-UPDATE-013'){
+ Configure $good
+ & $module {param($code,$feed)$script:ApiFailure="[$code] fixture API unavailable";$script:MockFeed=$feed} $Code (Feed @('v0.1.2-test','v0.1.3-test'))
+}
+foreach($code in @('SS-UPDATE-001','SS-UPDATE-013','SS-UPDATE-014')){
+ ConfigureFeed $code;$feedOffer=Get-StarSketchUpdate '0.1.2'
+ Assert ($feedOffer.available -and $feedOffer.version -eq '0.1.3') 'API unavailable uses official feed'
+ Assert ((& $module {$script:HeadCount}) -eq 2) 'HEAD checks both assets without downloading ZIP'
+}
+ConfigureFeed;Assert (!(Get-StarSketchUpdate '0.1.3').available) 'feed same version not offered'
+Assert (!(Get-StarSketchUpdate '1.0.0').available) 'feed never downgrades local development version'
+Assert ((& $module {$script:HeadCount}) -eq 0) 'no asset probes without newer release'
+ConfigureFeed;& $module {param($feed)$script:MockFeed=$feed} (Feed @('v0.1.10-test','v0.1.3-test'))
+Assert ((Get-StarSketchUpdate '0.1.10').version -eq '0.1.10') 'feed sorted numerically instead of entry order'
+ConfigureFeed;& $module {param($feed)$script:MockFeed=$feed} (Feed @('v0.1.3-test','v0.1.3'))
+Assert (!(Get-StarSketchUpdate '0.1.3').available) 'feed recognizes stable tags'
+$passed.Add('API quota, forbidden and offline fallback; feed versions, test releases and no downgrade')
+ConfigureFeed;& $module {$script:MockFeed='<feed/>'};Failure {Get-StarSketchUpdate '0.1.2'} 'SS-UPDATE-002'
+ConfigureFeed;& $module {$script:MockFeed='not XML'};Failure {Get-StarSketchUpdate '0.1.2'} 'SS-UPDATE-002'
+ConfigureFeed;& $module {$script:MockFeed=$script:MockFeed.Replace('https://github.com/ResidualNight/','https://example.com/ResidualNight/')};Failure {Get-StarSketchUpdate '0.1.2'} 'SS-UPDATE-004'
+ConfigureFeed;& $module {$script:MockFeed='<!DOCTYPE feed [<!ENTITY external SYSTEM "file:///C:/Windows/win.ini">]><feed xmlns="http://www.w3.org/2005/Atom">&external;</feed>'};Failure {Get-StarSketchUpdate '0.1.2'} 'SS-UPDATE-002'
+ConfigureFeed;& $module {$script:HeadSize=129MB};Failure {Get-StarSketchUpdate '0.1.2'} 'SS-UPDATE-011'
+ConfigureFeed;& $module {$script:HeadSize=-1};Failure {Get-StarSketchUpdate '0.1.2'} 'SS-UPDATE-011'
+Configure $good;& $module {$script:MockJson='not JSON'};Failure {Get-StarSketchUpdate '0.1.2'} 'SS-UPDATE-002'
+Assert ((& $module {$script:FeedReads}) -eq 0) 'invalid API metadata never bypassed with feed'
+$passed.Add('feed malformed, foreign links, DTD and unknown/oversize assets rejected; invalid API not bypassed')
+ConfigureFeed;$feedOffer=Get-StarSketchUpdate '0.1.2'
+$feedGame=Join-Path $run 'feed-update';Put (Join-Path $feedGame 'sinking_star.exe') 'MZ-fixture'
+Install-StarSketch $feedGame (Join-Path $oldBundle 'payload') $oldBundle | Out-Null
+$feedBefore=Snapshot $feedGame
+$corruptFeed=Join-Path $run 'feed-corrupt.zip';Put $corruptFeed 'corrupt'
+$originalFeedArchive=$good.downloads[$feedOffer.archive.browser_download_url]
+& $module {param($url,$path)$script:MockDownloads[$url]=$path} $feedOffer.archive.browser_download_url $corruptFeed
+Failure {Install-StarSketchUpdate $feedGame $feedOffer} 'SS-UPDATE-006'
+Assert ((Snapshot $feedGame) -eq $feedBefore) 'feed update retains ZIP hash protection and old install'
+& $module {param($url,$path)$script:MockDownloads[$url]=$path} $feedOffer.archive.browser_download_url $originalFeedArchive
+ConfigureFeed;$feedOffer=Get-StarSketchUpdate '0.1.2';Install-StarSketchUpdate $feedGame $feedOffer | Out-Null
+Assert ((Hash (Join-Path $feedGame 'dxgi.dll')) -eq (Hash (Join-Path $newBundle 'payload\dxgi.dll'))) 'feed update installed verified DLL'
+$passed.Add('feed offer uses receipt/ZIP checks and normal owned-file installation transaction')
+Configure $good
 $game=Join-Path $run '模拟 游戏';Put (Join-Path $game 'sinking_star.exe') 'MZ-fixture';Put (Join-Path $game 'saves\keep.txt') 'keep'
 Install-StarSketch $game (Join-Path $oldBundle 'payload') $oldBundle | Out-Null
 $before=Snapshot $game
@@ -157,5 +238,5 @@ Assert ([bool](Get-Command Get-StarSketchUpdate -ErrorAction SilentlyContinue)) 
 $installedPackage=Get-StarSketchPackage (Join-Path $game 'StarSketch-Manager\StarSketch-package.json');Uninstall-StarSketch $game $installedPackage | Out-Null
 Assert (!(Test-Path -LiteralPath (Join-Path $game 'StarSketch-Manager'))) 'self manager removed';Assert (Test-Path -LiteralPath (Join-Path $game 'saves\keep.txt')) 'uninstall preserves save';Remove-Module $installed
 $passed.Add('updated installed manager works without downloaded bundle and self-uninstalls')
-[ordered]@{date='2026-10-24';tests=$passed.ToArray();result='pass';fixtures=$run} | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $run 'results.json') -Encoding UTF8
+[ordered]@{date='2026-10-25';tests=$passed.ToArray();result='pass';fixtures=$run} | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $run 'results.json') -Encoding UTF8
 Write-Output ('PASS: '+$passed.Count+' online update regression groups');$passed | ForEach-Object{Write-Output ('  '+$_)}

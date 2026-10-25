@@ -1,6 +1,7 @@
 #pragma once
 #include "camera_grid.hpp"
 #include "errors.hpp"
+#include "level_watch.hpp"
 #include <string>
 #include <vector>
 namespace sketch {
@@ -10,7 +11,7 @@ class GameGridReader {
  std::vector<Candidate> candidates;std::vector<std::array<float,3>> actors;
  uintptr_t image=0,manager=0;bool checked=false,supported=false,heightOverride=false,rejectedCameraOrientation=false;
  float width=0,height=0,forcedZ=1;uint64_t started=0,lastScan=0;
- bool readLevel();void scan();
+ bool readLevel();void scan();bool verifyBuild();
  bool acceptsCamera(const CameraFrame& frame){
   auto result=validateCamera(frame,width,height);
   if(result==CameraValidation::OrientationInvalid)rejectedCameraOrientation=true;
@@ -21,6 +22,7 @@ public:
  ErrorId error=ErrorId::None;
  std::string diagnostic;int columns=0,rows=0;float planeZ=1;
  bool begin(float w,float h,bool overrideHeight,float z);
+ bool readCurrentLevel(LevelIdentity& identity);
  GameGridState poll(Grid& grid);
 };
 }

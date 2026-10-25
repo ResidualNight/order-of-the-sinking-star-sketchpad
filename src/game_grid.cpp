@@ -67,11 +67,17 @@ void GameGridReader::scan(){
   }
  }while(Thread32Next(snapshot,&thread));CloseHandle(snapshot);
 }
+bool GameGridReader::verifyBuild(){
+ if(!checked){checked=true;supported=fingerprint();image=reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));}
+ return supported;
+}
+bool GameGridReader::readCurrentLevel(LevelIdentity& identity){
+ return verifyBuild()&&readValidatedLevel(read,image,identity);
+}
 bool GameGridReader::begin(float w,float h,bool overrideHeight,float z){
  error=ErrorId::None;diagnostic.clear();rejectedCameraOrientation=false;
  width=w;height=h;heightOverride=overrideHeight;forcedZ=z;started=GetTickCount64();
- if(!checked){checked=true;supported=fingerprint();image=reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));}
- if(!supported)return fail(ErrorId::UnsupportedGameBuild);if(!readLevel())return false;
+ if(!verifyBuild())return fail(ErrorId::UnsupportedGameBuild);if(!readLevel())return false;
  std::vector<Candidate> live;for(auto c:candidates){auto frame=std::make_unique<CameraFrame>();if(read(c.address,frame->f.data(),960)&&acceptsCamera(*frame))live.push_back({c.address,frame->frame(),frame->f[211]});}
  candidates=std::move(live);if(candidates.empty())scan();diagnostic="waiting_for_fresh_camera_frame";return true;
 }

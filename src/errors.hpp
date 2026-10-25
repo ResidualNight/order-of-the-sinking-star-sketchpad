@@ -6,7 +6,7 @@ enum class ErrorId {
  None,UnsupportedGameBuild,EntityManagerUnavailable,SettingsArrayUnavailable,SettingsGridInvalid,
  ActorLayerUnavailable,FreshCameraFrameUnavailable,VisibleActorLayerUnavailable,LevelChanged,
  ProjectedGridInvalid,CameraNotFound,CameraOrientationInvalid,UnknownGameGrid,ImageGridUnconfirmed,ImageGridUnreliable,
- UnsupportedCaptureFormat,InvalidCalibration,Count
+ UnsupportedCaptureFormat,InvalidCalibration,KeyBindingConflict,ConfigReadFailure,ConfigWriteFailure,Count
 };
 struct ErrorInfo {const char* code;const char* diagnostic;const char* message;};
 inline constexpr ErrorInfo Errors[]={
@@ -22,11 +22,14 @@ inline constexpr ErrorInfo Errors[]={
  {"SS-GRID-009","projected_grid_invalid","当前高度层或视角无法生成有效网格，请重试或手动校准"},
  {"SS-GRID-010","validated_camera_unavailable","未找到通过校验的相机数据，请返回普通游戏视角后重新识别，或手动校准"},
  {"SS-GRID-011","camera_orientation_invalid","检测到翻转或方向异常的相机，已拒绝定位，请重新识别或手动校准"},
- {"SS-GRID-099","unknown_game_grid_error","数据定位失败，请重新识别或按 Shift+G 手动校准"},
+ {"SS-GRID-099","unknown_game_grid_error","数据定位失败，请重新识别或使用手动校准"},
  {"SS-IMAGE-001","image_grid_unconfirmed","检测到候选网格，请确认或手动调整；暂不启用吸附"},
- {"SS-IMAGE-002","image_grid_unreliable","未能可靠识别网格，请手动调整或按 Shift+G 校准"},
+ {"SS-IMAGE-002","image_grid_unreliable","未能可靠识别网格，请手动调整或使用四点校准"},
  {"SS-IMAGE-003","unsupported_capture_format","当前画面格式不支持图像识别，请手动调整网格"},
- {"SS-CAL-001","invalid_calibration","校准点无效，请按提示顺序重新选择"}
+ {"SS-CAL-001","invalid_calibration","校准点无效，请按提示顺序重新选择"},
+ {"SS-INPUT-001","key_binding_conflict","该按键组合与现有分配冲突，请选择其他组合"},
+ {"SS-CONFIG-001","preferences_read_failed","设置文件无法读取或格式无效，暂用默认设置；原文件保留，请检查文件权限或备份后重试"},
+ {"SS-CONFIG-002","preferences_write_failed","设置未能保存到磁盘，本次游戏内仍有效；请检查文件权限和剩余空间"}
 };
 static_assert(sizeof(Errors)/sizeof(Errors[0])==static_cast<unsigned>(ErrorId::Count));
 inline const ErrorInfo& errorInfo(ErrorId id){

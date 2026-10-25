@@ -30,26 +30,29 @@ struct Grid {
   if(!result.usable())result.valid=false;return result;
  }
 };
-enum class Kind{Stroke,Arrow,Pin};
+enum class Kind{Stroke,Arrow,Pin,Number};
 struct Mark{Kind kind=Kind::Stroke;std::vector<Point> points;uint32_t color=0x00b9daef;float width=3;int number=0;float radius=25;};
-struct Snapshot{std::vector<Mark> marks;int nextPin=1;};
+struct Snapshot{std::vector<Mark> marks;int nextNumber=1;};
 class Document{
 public:
- std::vector<Mark> marks;int nextPin=1;
+ std::vector<Mark> marks;int nextNumber=1;
  std::vector<Snapshot> undoStack,redoStack;
- Snapshot snapshot()const{return{marks,nextPin};}
+ Snapshot snapshot()const{return{marks,nextNumber};}
  void record(const Snapshot& before){undoStack.push_back(before);if(undoStack.size()>64)undoStack.erase(undoStack.begin());redoStack.clear();}
- void add(Mark mark){record(snapshot());if(mark.kind==Kind::Pin)mark.number=nextPin++;marks.push_back(std::move(mark));}
- void clear(){if(marks.empty()&&nextPin==1)return;record(snapshot());marks.clear();nextPin=1;}
- bool undo(){if(undoStack.empty())return false;redoStack.push_back(snapshot());auto s=std::move(undoStack.back());undoStack.pop_back();marks=std::move(s.marks);nextPin=s.nextPin;return true;}
- bool redo(){if(redoStack.empty())return false;undoStack.push_back(snapshot());auto s=std::move(redoStack.back());redoStack.pop_back();marks=std::move(s.marks);nextPin=s.nextPin;return true;}
+ // Continuous gestures append immediately and record their starting snapshot once on release.
+ void appendToGesture(Mark mark){mark.number=mark.kind==Kind::Number?nextNumber++:0;marks.push_back(std::move(mark));}
+ void add(Mark mark){record(snapshot());appendToGesture(std::move(mark));}
+ void restartNumbers(){if(nextNumber==1)return;record(snapshot());nextNumber=1;}
+ void clear(){if(marks.empty()&&nextNumber==1)return;record(snapshot());marks.clear();nextNumber=1;}
+ bool undo(){if(undoStack.empty())return false;redoStack.push_back(snapshot());auto s=std::move(undoStack.back());undoStack.pop_back();marks=std::move(s.marks);nextNumber=s.nextNumber;return true;}
+ bool redo(){if(redoStack.empty())return false;undoStack.push_back(snapshot());auto s=std::move(redoStack.back());redoStack.pop_back();marks=std::move(s.marks);nextNumber=s.nextNumber;return true;}
  void rescale(float sx,float sy){auto scale=[&](std::vector<Mark>& items){for(auto&m:items){for(auto&p:m.points){p.x*=sx;p.y*=sy;}m.width*=std::sqrt(sx*sy);m.radius*=std::sqrt(sx*sy);}};scale(marks);for(auto&s:undoStack)scale(s.marks);for(auto&s:redoStack)scale(s.marks);}
  // Subtract an exact circle from each polyline segment. New fragments never reconnect across an erased gap.
  bool eraseCircle(Point center,float radius){
   bool changed=false;std::vector<Mark> output;output.reserve(marks.size());
   for(auto&m:marks){
    if(m.points.empty())continue;
-   if(m.kind==Kind::Pin){if(distance(center,m.points[0])<=radius+m.radius){changed=true;continue;}output.push_back(m);continue;}
+   if(m.kind==Kind::Pin||m.kind==Kind::Number){if(distance(center,m.points[0])<=radius+m.radius){changed=true;continue;}output.push_back(m);continue;}
    if(m.kind==Kind::Arrow){Point a=m.points[0],b=m.points.back();float n=length(b-a);Point d=n>.01f?(b-a)*(1/n):Point{1,0};Point normal{-d.y,d.x};float h=std::max(12.f,m.width*4);Point h1=b-d*h+normal*(h*.45f),h2=b-d*h-normal*(h*.45f);
     if(segmentDistance(center,a,b)<=radius+m.width*.5f||segmentDistance(center,b,h1)<=radius+m.width*.5f||segmentDistance(center,b,h2)<=radius+m.width*.5f){changed=true;continue;}output.push_back(m);continue;}
    float r=radius+m.width*.5f;

@@ -114,21 +114,28 @@ function Assert-StarSketchOwnedFiles([string]$Root,$State){
   if((Test-Path -LiteralPath $path) -and (Get-StarSketchHash $path) -ne $item.sha256){throw "[SS-INSTALL-022] 已安装的文件被修改，未改动任何文件：$($item.path)"}
  }
 }
+function Get-StarSketchLegacyVersion($State,$Package){
+ $dllHash=@($State.files | Where-Object path -eq 'dxgi.dll')[0].sha256
+ $bundledHash=@($Package.files | Where-Object path -eq 'dxgi.dll')[0].sha256
+ if($dllHash -eq $bundledHash){return $Package.version}
+ if($dllHash -eq 'fb767808a0389e543af41d3f9496e849ddeda0a1b8b7c8dbc3fb50fa16828617'){return '0.1.1'}
+ if($dllHash -in @('d8b4cd185bcb01f37bc9477bedcff5370928d1ad95430df33b279086199c8c29','9f7bab48c931d01152a328cea80e3f12537750708c4aae5e1f222066505ad575','4a05fdb377c3c1428431e35cf6e1edec3f55b20e799e49ff4c8ccc185aa292d2')){return '0.1.2'}
+ return '0.0.0'
+}
 function Get-StarSketchStatus([string]$GameDirectory,$Package){
  $root=Get-StarSketchGameDirectory $GameDirectory
  $state=Read-StarSketchState $root $Package
- if($state){Assert-StarSketchOwnedFiles $root $state;return [pscustomobject]@{root=$root;installed=$true;version=$state.version;message="已安装 StarSketch $($state.version)，可更新或卸载。"}}
- $legacy=Get-StarSketchLegacyState $root $Package
- if($legacy){
-  $dllHash=@($legacy.files | Where-Object path -eq 'dxgi.dll')[0].sha256
-  $bundledHash=@($Package.files | Where-Object path -eq 'dxgi.dll')[0].sha256
-  $updateVersion='0.0.0'
-  if($dllHash -eq $bundledHash){$updateVersion=$Package.version}
-  elseif($dllHash -eq 'fb767808a0389e543af41d3f9496e849ddeda0a1b8b7c8dbc3fb50fa16828617'){$updateVersion='0.1.1'}
-  elseif($dllHash -in @('d8b4cd185bcb01f37bc9477bedcff5370928d1ad95430df33b279086199c8c29','9f7bab48c931d01152a328cea80e3f12537750708c4aae5e1f222066505ad575','4a05fdb377c3c1428431e35cf6e1edec3f55b20e799e49ff4c8ccc185aa292d2')){$updateVersion='0.1.2'}
-  return [pscustomobject]@{root=$root;installed=$true;version='manual';update_version=$updateVersion;message='检测到手动安装的 StarSketch，可更新或卸载。'}
- }
- return [pscustomobject]@{root=$root;installed=$false;version='';message='游戏目录正确，可以安装草稿纸。'}
+ $manual=!$state
+ if(!$state){$state=Get-StarSketchLegacyState $root $Package}
+ if(!$state){return [pscustomobject]@{root=$root;installed=$false;version='';update_version='';installation='none';display_version='';message='游戏目录正确，可以安装草稿纸。'}}
+ Assert-StarSketchOwnedFiles $root $state
+ $current=if($manual){Get-StarSketchLegacyVersion $state $Package}else{$state.version}
+ $label=if($current -eq '0.0.0'){'版本未登记'}else{$current}
+ $kind=if($manual){'手动复制'}else{'可视化安装器安装'}
+ $message="检测到 StarSketch $label（$kind）。`r`n更新：在完整安装包窗口中点击「安装 / 更新」安装本包 $($Package.version)，无需先卸载。`r`n卸载：点击「卸载草稿纸」移除当前版本，保留游戏、存档及其他文件。"
+ if($manual){$message+="`r`n手动版仅移除已确认归属的 DLL 和原字体；旧说明、许可证及自行添加的文件保留。"}
+ if($current -eq '0.1.2'){$message+="`r`n0.1.2 旧管理入口没有在线更新功能，请使用新版完整安装包；更新后管理入口会一并升级。"}
+ return [pscustomobject]@{root=$root;installed=$true;version=$state.version;update_version=$current;installation=$(if($manual){'manual'}else{'managed'});display_version=$label;message=$message}
 }
 function New-StarSketchTransaction([string]$Root){
  $path=Join-Path $Root ('.StarSketch-transaction-'+[guid]::NewGuid().ToString('N'))
@@ -243,6 +250,8 @@ function Uninstall-StarSketch([string]$GameDirectory,$Package){
  if(!$state){$state=Get-StarSketchLegacyState $root $Package}
  if(!$state){throw '[SS-INSTALL-033] 该目录没有可确认的 StarSketch 安装。'}
  Assert-StarSketchOwnedFiles $root $state
+ $removedVersion=if($state.version -eq 'manual'){Get-StarSketchLegacyVersion $state $Package}else{$state.version}
+ $removedLabel=if($removedVersion -eq '0.0.0'){'StarSketch'}else{"StarSketch $removedVersion"}
  $txn=New-StarSketchTransaction $root;$changes=[Collections.Generic.List[object]]::new();$keep=$false
  try{
   Assert-StarSketchStopped
@@ -265,26 +274,43 @@ function Uninstall-StarSketch([string]$GameDirectory,$Package){
   $path=[IO.Path]::GetFullPath((Join-Path $root $relative));Assert-StarSketchPlainPath $path
   if((Test-Path -LiteralPath $path -PathType Container) -and @(Get-ChildItem -LiteralPath $path -Force).Count -eq 0){[IO.Directory]::Delete($path)}
  }
- return [pscustomobject]@{root=$root;message='草稿纸已卸载。游戏文件、存档及其他文件保留。手动复制的旧说明或许可证可能仍在目录中。'}
+ return [pscustomobject]@{root=$root;version=$removedVersion;message="$removedLabel 已卸载。游戏文件、存档及其他文件保留。手动复制的旧说明或许可证可能仍在目录中。"}
 }
 # Online updates use the same owned-file transaction as local installs. Downloaded
 # scripts are installed as data; this running manager never executes their code.
 $script:ReleaseApi='https://api.github.com/repos/ResidualNight/order-of-the-sinking-star-sketchpad/releases?per_page=100'
 $script:ReleaseRoot='https://github.com/ResidualNight/order-of-the-sinking-star-sketchpad/releases'
+$script:ReleaseFeed=$script:ReleaseRoot+'.atom'
 function Assert-StarSketchUpdateUri([string]$Address,[switch]$Redirect){
  $uri=$null
  if(![Uri]::TryCreate($Address,[UriKind]::Absolute,[ref]$uri) -or $uri.Scheme -ne 'https' -or $uri.Port -ne 443 -or $uri.UserInfo){throw '[SS-UPDATE-004] 更新地址不属于项目官方 HTTPS 下载源。'}
- $official=$Address -ceq $script:ReleaseApi -or $Address -cmatch '^https://github\.com/ResidualNight/order-of-the-sinking-star-sketchpad/releases/download/v[0-9]+\.[0-9]+\.[0-9]+(-test)?/StarSketch-[0-9]+\.[0-9]+\.[0-9]+-installer(\.zip|-manifest\.json)$'
+ $official=$Address -ceq $script:ReleaseApi -or $Address -ceq $script:ReleaseFeed -or $Address -cmatch '^https://github\.com/ResidualNight/order-of-the-sinking-star-sketchpad/releases/download/v[0-9]+\.[0-9]+\.[0-9]+(-test)?/StarSketch-[0-9]+\.[0-9]+\.[0-9]+-installer(\.zip|-manifest\.json)$'
  if(!$official -and !($Redirect -and $uri.Host -in @('release-assets.githubusercontent.com','objects.githubusercontent.com'))){throw '[SS-UPDATE-004] 更新地址不属于项目官方 HTTPS 下载源。'}
 }
-function Read-StarSketchHttp([string]$Address,[long]$Limit,[string]$Destination){
+function Format-StarSketchHttpFailure([string]$Address,[int]$Status,$Headers,[string]$Reason){
+ $hostName=([Uri]$Address).Host
+ if($Status -eq 429 -or ($Status -eq 403 -and $Headers['X-RateLimit-Remaining'] -eq '0')){
+  $wait='请稍后重试。';$reset=0L
+  if([long]::TryParse($Headers['X-RateLimit-Reset'],[ref]$reset)){
+   try{$time=([datetime]'1970-01-01Z').ToUniversalTime().AddSeconds($reset).ToLocalTime();$wait="请在 $($time.ToString('yyyy-MM-dd HH:mm:ss'))（本机时间）后重试。"}catch{}
+  }
+  return "[SS-UPDATE-013] GitHub 请求额度已用尽或触发限流（$hostName，HTTP $Status）。$wait 浏览器能打开 GitHub 网页不代表 API 仍有额度；也可从项目发布页完整下载安装包。"
+ }
+ if($Status -eq 403){return "[SS-UPDATE-014] GitHub 请求被拒绝（$hostName，HTTP 403），未确认是额度耗尽。请检查代理对该域名的规则，或从项目发布页完整下载安装包。"}
+ $detail=if($Status){"HTTP $Status"}else{$Reason}
+ return "[SS-UPDATE-001] 无法连接 GitHub 或下载更新（$hostName）。请检查网络及代理、稍后重试；也可从项目发布页完整下载安装包。原因：$detail"
+}
+function New-StarSketchHttpRequest([string]$Address){[Net.HttpWebRequest]::Create($Address)}
+function Read-StarSketchHttp([string]$Address,[long]$Limit,[string]$Destination,[switch]$Head){
  Assert-StarSketchUpdateUri $Address
  $response=$null;$input=$null;$output=$null
  try{
   [Net.ServicePointManager]::SecurityProtocol=[Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
-  $request=[Net.HttpWebRequest]::Create($Address);$request.UserAgent='StarSketch-Updater/1.0';$request.Accept='application/vnd.github+json';$request.Timeout=15000;$request.ReadWriteTimeout=15000;$request.MaximumAutomaticRedirections=5
+  $request=New-StarSketchHttpRequest $Address;$request.UserAgent='StarSketch-Updater/1.0';$request.Accept=if($Address -ceq $script:ReleaseApi){'application/vnd.github+json'}else{'*/*'};$request.Timeout=15000;$request.ReadWriteTimeout=15000;$request.MaximumAutomaticRedirections=5
+  if($Head){$request.Method='HEAD'}
   $response=$request.GetResponse();Assert-StarSketchUpdateUri $response.ResponseUri.AbsoluteUri -Redirect
   if($response.ContentLength -gt $Limit){throw '[SS-UPDATE-011] 更新下载大小超过允许范围，已停止。'}
+  if($Head){return $response.ContentLength}
   $input=$response.GetResponseStream()
   if($Destination){Assert-StarSketchPlainPath $Destination;$output=[IO.File]::Open($Destination,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)}else{$output=[IO.MemoryStream]::new()}
   $buffer=New-Object byte[] 65536;$total=0L;$deadline=[DateTime]::UtcNow.AddMinutes(2)
@@ -296,8 +322,35 @@ function Read-StarSketchHttp([string]$Address,[long]$Limit,[string]$Destination)
   if(!$Destination){return [Text.Encoding]::UTF8.GetString($output.ToArray())}
  }catch{
   if($_.Exception.Message -match '^\[SS-'){throw}
-  throw "[SS-UPDATE-001] 无法连接 GitHub 或下载更新，请检查网络、稍后重试。原因：$($_.Exception.Message)"
+  $cause=$_.Exception;$status=0;$headers=@{}
+  while($cause){
+   if($cause -is [Net.WebException] -and $cause.Response){$response=$cause.Response;$status=[int]$response.StatusCode;$headers=$response.Headers;break}
+   $cause=$cause.InnerException
+  }
+  throw (Format-StarSketchHttpFailure $Address $status $headers $_.Exception.Message)
  }finally{if($output){$output.Dispose()};if($input){$input.Dispose()};if($response){$response.Dispose()}}
+}
+function Get-StarSketchFeedReleases{
+ $reader=$null;$text=$null
+ try{
+  $body=Read-StarSketchHttp $script:ReleaseFeed 4MB
+  $settings=[Xml.XmlReaderSettings]::new();$settings.DtdProcessing=[Xml.DtdProcessing]::Prohibit;$settings.XmlResolver=$null
+  $text=[IO.StringReader]::new($body);$reader=[Xml.XmlReader]::Create($text,$settings)
+  $document=[Xml.XmlDocument]::new();$document.XmlResolver=$null;$document.Load($reader)
+  $ns=[Xml.XmlNamespaceManager]::new($document.NameTable);$ns.AddNamespace('a','http://www.w3.org/2005/Atom')
+  $entries=$document.SelectNodes('/a:feed/a:entry',$ns)
+  if(!$entries.Count){throw '[SS-UPDATE-002] GitHub 发布订阅未包含可识别的版本。'}
+  foreach($entry in $entries){
+   $links=$entry.SelectNodes('a:link[@rel="alternate"]',$ns)
+   if($links.Count -ne 1){throw '[SS-UPDATE-002] GitHub 发布订阅的版本链接无效。'}
+   $link=$links[0].GetAttribute('href')
+   if(!$link.StartsWith($script:ReleaseRoot+'/tag/',[StringComparison]::Ordinal)){throw '[SS-UPDATE-004] 发布订阅包含非本项目的版本地址。'}
+   $tag=$link.Substring(($script:ReleaseRoot+'/tag/').Length)
+   if($tag -cnotmatch '^v[0-9]+\.[0-9]+\.[0-9]+(-test)?$'){continue}
+   [pscustomobject]@{draft=$false;prerelease=$tag.EndsWith('-test');tag_name=$tag;assets=@()}
+  }
+ }catch{if($_.Exception.Message -match '^\[SS-'){throw};throw '[SS-UPDATE-002] GitHub 发布订阅无法解析，请稍后重试。'}
+ finally{if($reader){$reader.Dispose()};if($text){$text.Dispose()}}
 }
 function Get-StarSketchReleaseAsset($Release,[string]$Name,[long]$Limit){
  if(!$Release -or !$Release.PSObject.Properties['assets']){throw '[SS-UPDATE-002] GitHub 发布文件信息无效。'}
@@ -315,7 +368,13 @@ function Get-StarSketchReleaseAsset($Release,[string]$Name,[long]$Limit){
 function Get-StarSketchUpdate([string]$CurrentVersion){
  if($CurrentVersion -notmatch '^\d+\.\d+\.\d+$'){throw '[SS-UPDATE-002] 当前版本号无效，无法检查更新。'}
  try{$current=[version]$CurrentVersion}catch{throw '[SS-UPDATE-002] 当前版本号无效，无法检查更新。'}
- try{$decoded=(Read-StarSketchHttp $script:ReleaseApi 4MB) | ConvertFrom-Json;$releases=@($decoded)}catch{if($_.Exception.Message -match '^\[SS-'){throw};throw '[SS-UPDATE-002] GitHub 发布信息无法解析，请稍后重试。'}
+ $fromFeed=$false
+ try{$decoded=(Read-StarSketchHttp $script:ReleaseApi 4MB) | ConvertFrom-Json;$releases=@($decoded)}catch{
+  if($_.Exception.Message -match '^\[SS-UPDATE-(001|013|014)\]'){
+   $apiFailure=$_.Exception.Message
+   try{$releases=@(Get-StarSketchFeedReleases);$fromFeed=$true}catch{throw "$($_.Exception.Message)`r`nAPI 检查原因：$apiFailure"}
+  }elseif($_.Exception.Message -match '^\[SS-'){throw}else{throw '[SS-UPDATE-002] GitHub 发布信息无法解析，请稍后重试。'}
+ }
  $choices=@(foreach($release in $releases){
   foreach($field in @('draft','tag_name','prerelease')){if(!$release -or !$release.PSObject.Properties[$field]){throw '[SS-UPDATE-002] GitHub 发布信息不完整，请稍后重试。'}}
   if($release.draft -or $release.tag_name -cnotmatch '^v(\d+\.\d+\.\d+)(-test)?$'){continue}
@@ -326,6 +385,16 @@ function Get-StarSketchUpdate([string]$CurrentVersion){
  if(!$choices.Count){throw '[SS-UPDATE-002] GitHub 未返回可识别的发布版本。'}
  $latest=$choices | Sort-Object -Property @{Expression='number';Descending=$true},@{Expression='stable';Descending=$true} | Select-Object -First 1
  if($latest.number -le $current){return [pscustomobject]@{available=$false;current_version=$CurrentVersion;version=$latest.version;message="当前已是最新版本（$CurrentVersion），无需更新。"}}
+ if($fromFeed){
+  # The public Atom feed includes test releases without consuming REST quota.
+  # HEAD confirms official assets and size; the existing receipt, ZIP, DLL and
+  # payload checks still run before installation. API digests remain optional.
+  $latest.release.assets=@(foreach($item in @(@{name="StarSketch-$($latest.version)-installer.zip";limit=128MB},@{name="StarSketch-$($latest.version)-installer-manifest.json";limit=64KB})){
+   $url="$script:ReleaseRoot/download/$($latest.release.tag_name)/$($item.name)"
+   $size=Read-StarSketchHttp $url $item.limit -Head
+   [pscustomobject]@{name=$item.name;browser_download_url=$url;state='uploaded';size=$size}
+  })
+ }
  $archive=Get-StarSketchReleaseAsset $latest.release ("StarSketch-$($latest.version)-installer.zip") 128MB
  $receipt=Get-StarSketchReleaseAsset $latest.release ("StarSketch-$($latest.version)-installer-manifest.json") 64KB
  return [pscustomobject]@{available=$true;current_version=$CurrentVersion;version=$latest.version;tag=$latest.release.tag_name;release_url="$script:ReleaseRoot/tag/$($latest.release.tag_name)";archive=$archive;receipt=$receipt;message="发现新版 $($latest.version)（当前 $CurrentVersion）。"}

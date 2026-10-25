@@ -21,7 +21,7 @@ StarSketch is a Windows x64 / DirectX 12 in-game sketchpad for Order of the Sink
 
 ## Boundaries
 
-- Preserve screen-fixed marks and session-only state; do not add persistence by accident.
+- Preserve screen-fixed marks and session-only drawing/history/calibration. User-authorized preferences and key bindings persist in %LOCALAPPDATA%/StarSketch/settings.ini; never serialize marks or calibrated grid geometry.
 - Read game data only after the exact executable hash and runtime layouts validate.
 - Keep manual calibration; invalid data must not silently enable old automatic snapping.
 - Never force-stop a running game. Update an installed DLL only after a graceful exit.
@@ -43,4 +43,14 @@ Broader level, resolution and multi-layer coverage is still pending.
 
 0.1.4 fixes backup retention when rollback and directory cleanup both fail, surfaces cleanup warnings in the GUI, and unwraps background exceptions to retain their original error identifiers. Game behavior is unchanged from 0.1.3; only the runtime version marker changes. Installer regressions include secondary cleanup failure and background self-update.
 
-The graphical installer and manual-copy player ZIP are both distributed with the v0.1.4-test release and contain the same 0.1.4 runtime. Earlier releases remain available. Online updates require the 0.1.3 manager or later; old 0.1.2 managers first need a full installer update.
+The graphical installer and manual-copy player ZIP are both distributed with the v0.2.0-test release and contain the same 0.2.0 runtime. Earlier releases remain available. Online updates require the 0.1.3 manager or later; old 0.1.2 managers first need a full installer update.
+
+0.2.0 includes in-game persistent key rebinding, three base/two custom shared swatches, unnumbered colored stars with antique gold rims and a separate default-N numbered tool with bold outlined serif digits. GitHub publication was explicitly authorized by the user on 2026-10-25.
+
+The 0.2.0 release tag is `v0.2.0-test`; final reviewed ZIPs, both update-compatible JSON receipts, checksums and local release notes are in ignored `dist/release-0.2.0/`. Keep release names compatible with the updater, and never announce availability before the assets are uploaded. See docs/验证记录.md for final hashes and check results.
+
+For original 0.1.2 migration regressions, run `powershell.exe -NoProfile -ExecutionPolicy Bypass -File ./tests/legacy_012_tests.ps1 -InstallerArchive <new installer ZIP>` after packaging. It checksum-pins the original 0.1.2 manual/installer ZIPs in dist/ and operates only on work/ fixtures; never run compatibility uninstall tests against a real game.
+
+0.2.0 also supports grouped left-drag numbering on confirmed snapping grids and a remappable default N+C restart that preserves existing marks. Two ordinary-key chords consume their component actions; participating single-key actions fire on release. Keep previously installed local 0.1.5 DLL hashes allowlisted when packaging the 0.2.0 replacement.
+
+The in-game entry is now “键位与设置”. Keep infrequent controls there, except grid fine tuning stays on the main panel and appears only while grid snapping is enabled. Auto-clear on a confirmed level transition starts OFF, and the user choice persists with other preferences. Level monitoring requires the exact executable hash, validated Settings fields and a stable identity; invalid/loading samples preserve marks. Clearing on transition is undoable.
