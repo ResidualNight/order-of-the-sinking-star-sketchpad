@@ -23,6 +23,7 @@ bool readFile(const std::wstring& path,std::string& text){
 }
 std::string encodePreferences(const App& app){
  std::ostringstream out;out.imbue(std::locale::classic());out<<std::setprecision(9)<<"format=1\nauto_clear="<<app.autoClearOnLevel<<"\ngrid="<<app.gridEnabled<<"\ntint="<<app.tint<<"\ncolor="<<app.colorIndex<<"\ncustom1="<<app.colors[3]<<"\ncustom2="<<app.colors[4]<<"\npen_width="<<app.penWidth<<"\nerase_radius="<<app.eraseRadius<<"\npin_radius="<<app.pinRadius<<"\nnumber_radius="<<app.numberRadius<<"\nmark_opacity="<<app.markOpacity<<"\ntint_opacity="<<app.tintOpacity<<'\n';
+ for(size_t i=0;i<app.gridDirections.size();++i)out<<"grid_direction."<<i<<'='<<app.gridDirections[i]<<'\n';
  for(int i=0;i<int(Action::Count);++i){auto b=app.bindings.get(static_cast<Action>(i));out<<"key."<<ActionNames[i]<<'='<<keyCode(b.key)<<','<<modCode(b.mods)<<','<<keyCode(b.companion)<<'\n';}return out.str();
 }
 bool decodePreferences(const std::string& text,App& app){
@@ -34,11 +35,12 @@ bool decodePreferences(const std::string& text,App& app){
  auto boolean=[&](const char* name,bool& field){int v=field?1:0;if(!integer(name,v,0,1))return false;field=v!=0;return true;};
  auto scalar=[&](const char* name,float& field,float lo,float hi){auto it=entries.find(name);if(it==entries.end())return true;float v=0;if(!number(it->second,v)||!std::isfinite(v)||v<lo||v>hi)return false;field=v;return true;};
  if(!boolean("auto_clear",values.autoClearOnLevel)||!boolean("grid",values.gridEnabled)||!boolean("tint",values.tint)||!integer("color",values.colorIndex,0,4)||!scalar("pen_width",values.penWidth,1,12)||!scalar("erase_radius",values.eraseRadius,5,60)||!scalar("pin_radius",values.pinRadius,16,48)||!scalar("number_radius",values.numberRadius,16,48)||!scalar("mark_opacity",values.markOpacity,.2f,.95f)||!scalar("tint_opacity",values.tintOpacity,.04f,.5f))return false;
+ for(size_t i=0;i<values.gridDirections.size();++i){auto key="grid_direction."+std::to_string(i);if(!integer(key.c_str(),values.gridDirections[i],-1,3))return false;}
  for(int i=3;i<5;++i){auto it=entries.find(i==3?"custom1":"custom2");if(it!=entries.end()){uint64_t c=0;if(!number(it->second,c)||c>UINT32_MAX||(c>>24)!=255)return false;values.colors[i]=uint32_t(c);}}
  std::array<KeyBinding,size_t(Action::Count)> bindings{};
  for(int i=0;i<int(Action::Count);++i){bindings[i]=values.bindings.get(static_cast<Action>(i));auto it=entries.find(std::string("key.")+ActionNames[i]);if(it==entries.end())continue;std::string data=it->second;for(auto&c:data)if(c==',')c=' ';std::istringstream in(data);int key=0,mods=0,companion=0;if(!(in>>key>>mods>>companion)||mods<0||mods>7||keyCode(fromCode(key))!=key||keyCode(fromCode(companion))!=companion)return false;in>>std::ws;if(!in.eof())return false;bindings[i]={fromCode(key),fromMods(mods),fromCode(companion)};}
  if(!values.bindings.restore(bindings))return false;
- app.autoClearOnLevel=values.autoClearOnLevel;app.gridEnabled=values.gridEnabled;app.tint=values.tint;app.colorIndex=values.colorIndex;app.colors=values.colors;app.penWidth=values.penWidth;app.eraseRadius=values.eraseRadius;app.pinRadius=values.pinRadius;app.numberRadius=values.numberRadius;app.markOpacity=values.markOpacity;app.tintOpacity=values.tintOpacity;app.bindings=values.bindings;return true;
+ app.autoClearOnLevel=values.autoClearOnLevel;app.gridEnabled=values.gridEnabled;app.tint=values.tint;app.gridDirections=values.gridDirections;app.colorIndex=values.colorIndex;app.colors=values.colors;app.penWidth=values.penWidth;app.eraseRadius=values.eraseRadius;app.pinRadius=values.pinRadius;app.numberRadius=values.numberRadius;app.markOpacity=values.markOpacity;app.tintOpacity=values.tintOpacity;app.bindings=values.bindings;return true;
 }
 bool PreferenceStore::resolvePath(){
  if(!path.empty())return true;DWORD size=GetEnvironmentVariableW(L"LOCALAPPDATA",nullptr,0);if(!size||size>32700)return false;std::vector<wchar_t> buffer(size);if(!GetEnvironmentVariableW(L"LOCALAPPDATA",buffer.data(),size))return false;path=std::wstring(buffer.data())+L"\\StarSketch\\settings.ini";return true;

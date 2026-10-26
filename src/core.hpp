@@ -12,14 +12,32 @@ inline float length(Point a){return std::sqrt(dot(a,a));}
 inline float distance(Point a,Point b){return length(a-b);}
 inline float segmentDistance(Point p,Point a,Point b){auto d=b-a; float q=dot(d,d);return distance(p,a+d*(q>0?std::clamp(dot(p-a,d)/q,0.f,1.f):0.f));}
 struct Grid {
+ static constexpr float MaxCellCoordinate=1e6f;
  Point origin{},u{60,0},v{0,60}; float px=0,py=0;bool valid=false; float confidence=0;
  void scaleStep(float factor){u=u*factor;v=v*factor;px*=factor;py*=factor;}
+ // Reflect screen coordinates, including the projective numerator. Negating a
+ // grid axis alone only relabels cells and cannot correct a mirrored image.
+ Grid reflected(float width,float height,bool horizontal,bool vertical)const{
+  Grid result=*this;
+  if(horizontal){result.origin.x=width-origin.x;result.u.x=width*px-u.x;result.v.x=width*py-v.x;}
+  if(vertical){result.origin.y=height-origin.y;result.u.y=height*px-u.y;result.v.y=height*py-v.y;}
+  return result;
+ }
  float denominator(float x,float y)const{return 1+px*x+py*y;}
  Point at(float x,float y)const{float d=denominator(x,y);if(std::abs(d)<.00001f)return{NAN,NAN};return(origin+u*x+v*y)*(1/d);}
  float determinant()const{Point a=at(1,0)-origin,b=at(0,1)-origin;return a.x*b.y-a.y*b.x;}
  bool usable()const{return valid&&std::isfinite(determinant())&&length(at(1,0)-origin)>=8&&length(at(0,1)-origin)>=8&&std::abs(determinant())>32;}
  Point cell(Point p)const{float a=u.x-p.x*px,b=v.x-p.x*py,c=u.y-p.y*px,d=v.y-p.y*py,det=a*d-b*c;Point q=p-origin;if(std::abs(det)<.00001f)return{NAN,NAN};return{(q.x*d-b*q.y)/det,(a*q.y-q.x*c)/det};}
- Point snap(Point p)const{if(!usable())return p;Point q=cell(p);if(!std::isfinite(q.x)||!std::isfinite(q.y))return p;Point result=at(std::round(q.x),std::round(q.y));return std::isfinite(result.x)&&std::isfinite(result.y)?result:p;}
+ Point snap(Point p)const{if(!usable())return p;Point q=cell(p);if(!std::isfinite(q.x)||!std::isfinite(q.y)||std::abs(q.x)>MaxCellCoordinate||std::abs(q.y)>MaxCellCoordinate)return p;Point result=at(std::round(q.x),std::round(q.y));return std::isfinite(result.x)&&std::isfinite(result.y)?result:p;}
+ bool visibleCells(float width,float height,int& x0,int& x1,int& y0,int& y1)const{
+  if(!usable()||!std::isfinite(width)||!std::isfinite(height)||width<=0||height<=0)return false;
+  double xmin=INFINITY,ymin=INFINITY,xmax=-INFINITY,ymax=-INFINITY;Point corners[]={{0,0},{width,0},{width,height},{0,height}};
+  for(auto p:corners){auto q=cell(p);if(!std::isfinite(q.x)||!std::isfinite(q.y)||std::abs(q.x)>MaxCellCoordinate||std::abs(q.y)>MaxCellCoordinate)return false;
+   xmin=std::min(xmin,double(q.x));xmax=std::max(xmax,double(q.x));ymin=std::min(ymin,double(q.y));ymax=std::max(ymax,double(q.y));}
+  xmin=std::floor(xmin)-1;xmax=std::ceil(xmax)+1;ymin=std::floor(ymin)-1;ymax=std::ceil(ymax)+1;
+  if(xmax-xmin>220||ymax-ymin>220)return false;
+  x0=int(xmin);x1=int(xmax);y0=int(ymin);y1=int(ymax);return true;
+ }
  static Grid fromQuad(const std::vector<Point>&corners,int columns,int rows){
   Grid result;if(corners.size()!=4||columns<1||rows<1||columns>200||rows>200)return result;
   float sign=0;for(int i=0;i<4;i++){Point a=corners[(i+1)%4]-corners[i],b=corners[(i+2)%4]-corners[(i+1)%4];float cross=a.x*b.y-a.y*b.x;if(std::abs(cross)<1)return result;if(i==0)sign=cross;else if(sign*cross<=0)return result;}

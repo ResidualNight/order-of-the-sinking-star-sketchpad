@@ -5,7 +5,7 @@
 
 namespace sketch {
 enum class Action {Toggle,Pen,Arrow,Pin,Number,Grid,Tint,Calibrate,Clear,Undo,Redo,Erase,RestartNumber,Count};
-inline constexpr const char* ActionLabels[]={"进入 / 退出绘画","自由画笔","箭头","星标","编号","网格与吸附","棋盘染色","透视四点校准","清空标记","撤销","重做","按住擦除","编号从 1 开始"};
+inline constexpr const char* ActionLabels[]={"进入 / 退出绘画","自由画笔","箭头","星标","编号","网格与吸附","棋盘染色","临时选择相机","清空标记","撤销","重做","按住擦除","编号从 1 开始"};
 inline constexpr const char* ActionNames[]={"toggle","pen","arrow","pin","number","grid","tint","calibrate","clear","undo","redo","erase","restart_number"};
 struct KeyBinding {ImGuiKey key;ImGuiKeyChord mods=0;ImGuiKey companion=ImGuiKey_None;};
 inline bool operator==(KeyBinding a,KeyBinding b){return a.mods==b.mods&&((a.key==b.key&&a.companion==b.companion)||(a.companion!=ImGuiKey_None&&a.key==b.companion&&a.companion==b.key));}

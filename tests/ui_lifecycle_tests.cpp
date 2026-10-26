@@ -1,11 +1,12 @@
 #include "ui.hpp"
+#include "camera_fixture.hpp"
 #include <cassert>
 #include <iostream>
 #include <set>
 using namespace sketch;
 void checkPreferences();
 namespace {
-void frame(App& app){auto&io=ImGui::GetIO();io.DisplaySize={1920,1080};io.DeltaTime=1.f/60;ImGui::NewFrame();app.frame(1920,1080);ImGui::Render();if(app.wantExit){app.wantExit=false;app.setEditing(false);}}
+void frame(App& app,float width=1920,float height=1080){auto&io=ImGui::GetIO();io.DisplaySize={width,height};io.DeltaTime=1.f/60;ImGui::NewFrame();app.frame(width,height);ImGui::Render();if(app.wantExit){app.wantExit=false;app.setEditing(false);}}
 void key(App& app,ImGuiKey k,ImGuiKeyChord mods=0){
  auto&io=ImGui::GetIO();io.AddKeyEvent(ImGuiMod_Ctrl,(mods&ImGuiMod_Ctrl)!=0);io.AddKeyEvent(ImGuiMod_Alt,(mods&ImGuiMod_Alt)!=0);io.AddKeyEvent(ImGuiMod_Shift,(mods&ImGuiMod_Shift)!=0);io.AddKeyEvent(k,true);frame(app);
  io.AddKeyEvent(k,false);io.AddKeyEvent(ImGuiMod_Ctrl,false);io.AddKeyEvent(ImGuiMod_Alt,false);io.AddKeyEvent(ImGuiMod_Shift,false);frame(app);frame(app);
@@ -26,7 +27,7 @@ void levelInteractions(){
  assert(app.observeLevel(&a,2800)&&app.document.marks.empty()&&app.document.nextNumber==1&&app.gridRefresh.requested);
  assert(app.gridEnabled&&app.tint&&app.colorIndex==3&&app.penWidth==6);assert(app.document.undo()&&app.document.marks.size()==1&&app.document.nextNumber==2);
  assert(!app.observeLevel(nullptr,3000)&&app.document.marks.size()==1);assert(!app.observeLevel(&a,3200)&&app.document.marks.size()==1);
- app.setEditing(true);app.resize(1600,900);app.startManual();assert(!app.observeLevel(&a,3400)&&app.document.marks.size()==1); // View/UI/calibration are not identity changes.
+ app.setEditing(true);app.resize(1600,900);app.startCameraPicker();assert(!app.observeLevel(&a,3400)&&app.document.marks.size()==1); // View/UI/calibration are not identity changes.
  assert(!app.observeLevel(&b,3600)&&!app.observeLevel(&a,3800)&&app.document.marks.size()==1); // Short candidate does not clear.
 }
 void numberingInteractions(){
@@ -92,13 +93,124 @@ void numberingInteractions(){
  io.AddKeyEvent(ImGuiKey_C,false);io.AddKeyEvent(ImGuiKey_N,false);frame(app);frame(app);assert(app.document.marks.size()==count);
  app.setEditing(false);
 }
+void directionInteractions(){
+ App app;app.resize(1920,1080);app.setEditing(true);app.tint=true;
+ Grid expected=Grid::fromQuad({{600,280},{1300,320},{1400,920},{500,860}},8,7);
+ Grid reflected=expected.reflected(1920,1080,false,true);
+ app.acceptGameGrid(reflected,6,1920,1080,1);
+ assert(app.gridDirectionPending&&!app.gridConfirmed&&app.gridFromGame&&app.gridEnabled&&app.status.find("[SS-GRID-011]")==0);
+ assert(app.gridDirections[6]==-1&&!app.gridRefresh.requested);
+ // A preview is visible but tools still place at the cursor until confirmed.
+ app.tool=Kind::Pin;Point cursor{1123,743};click(app,cursor);
+ assert(app.document.marks.size()==1&&distance(app.document.marks[0].points[0],cursor)<.001f);
+ app.adjustGridDirection(2);assert(app.gridDirectionPending&&!app.gridConfirmed&&app.gridDirections[6]==-1);
+ for(int x=0;x<8;++x)for(int y=0;y<7;++y)assert(distance(app.grid.at(float(x),float(y)),expected.at(float(x),float(y)))<.01f);
+ app.confirmGridDirection();assert(app.gridConfirmed&&!app.gridDirectionPending&&app.gridDirections[6]==2);
+ assert(distance(app.document.marks[0].points[0],cursor)<.001f);
+ frame(app);click(app,cursor);assert(distance(app.document.marks.back().points[0],expected.snap(cursor))<.01f);
+ app.requestGrid();assert(!app.gridFromGame&&!app.gridDirectionPending&&!app.gridConfirmed&&app.gridDirections[6]==2);
+ app.adjustGridDirection(1);assert(!app.gridConfirmed); // An old base cannot revive after refresh.
+ app.acceptGameGrid(reflected,6,1920,1080,1);assert(app.gridConfirmed&&app.gridDirection==2&&!app.gridDirectionPending);
+ auto point=app.grid.at(3,4);assert(distance(point,expected.at(3,4))<.01f);
+ // Preferences describe a direction, not screen dimensions or grid geometry.
+ Grid larger=Grid::fromQuad({{800,373.3333f},{1733.3333f,426.6667f},{1866.6667f,1226.6667f},{666.6667f,1146.6667f}},8,7);
+ app.acceptGameGrid(larger.reflected(2560,1440,false,true),6,2560,1440,1);
+ assert(app.gridConfirmed&&distance(app.grid.at(3,4),larger.at(3,4))<.01f);
+ app.acceptGameGrid(expected,0,1920,1080,1);assert(app.gridConfirmed&&app.gridDirection==0&&distance(app.grid.at(3,4),point)<.01f);
+ app.acceptGameGrid(expected,4,1920,1080,1);assert(!app.gridConfirmed&&app.gridDirectionPending);
+ app.confirmGridDirection();assert(app.gridDirections[4]==0); // Remember explicitly choosing the original orientation.
+ app.adjustGridDirection(3);assert(!app.gridConfirmed&&app.gridDirectionPending&&app.gridDirections[4]==0);
+ app.startCameraPicker();assert(!app.gridDirectionPending&&!app.gridFromGame&&!app.gridConfirmed);
+ app.confirmGridDirection();assert(!app.gridConfirmed&&app.gridDirections[4]==0);
+ app.acceptGameGrid(reflected,6,1920,1080,1);app.adjustGridDirection(0);app.rejectGameGrid(ErrorId::CameraNotFound);
+ assert(!app.gridDirectionPending&&!app.gridFromGame&&!app.gridConfirmed&&app.gridDirections[6]==2);
+ app.acceptGameGrid(Grid{},6,1920,1080,1);assert(!app.gridConfirmed&&app.status==errorMessage(ErrorId::ProjectedGridInvalid));
+}
+void pickerInteractions(){
+ App app;app.resize(1920,1080);app.setEditing(true);app.tint=true;
+ Mark mark;mark.kind=Kind::Pin;mark.points={{1500,900}};app.document.add(mark);app.gridDirections[6]=1;app.gridPlaneOverride=true;app.gridPlaneZ=7;auto directions=app.gridDirections;
+ app.startCameraPicker();assert(app.cameraPickerOpen&&app.pickerCollecting&&app.pickerRefreshRequested&&!app.gridConfirmed&&!app.gridRefresh.requested);
+ click(app,{1100,700});assert(app.document.marks.size()==1&&!app.adoptCameraPreview());
+ std::vector<CameraOption> options(2);options[0].token=1;options[0].camera=gameCameraFixture();options[0].copies=2;options[0].suggestedZ=1;
+ options[1]=options[0];options[1].token=2;
+ for(int base:{0,192})for(int col=0;col<4;++col)options[1].camera.f[base+4+col]*=-1;
+ for(int base:{16,176})for(int row=0;row<4;++row)options[1].camera.f[base+row*4+1]*=-1;
+ options[1].directionCategory=6;
+ app.acceptCameraOptions(options,1920,1080);assert(app.cameraOptions.size()==2&&app.selectedCamera==0&&!app.pickerCollecting&&!app.gridConfirmed);
+ auto normal=app.cameraPickerPreview();assert(normal.usable());app.selectCamera(1);app.pickerFlip=2;
+ auto corrected=app.cameraPickerPreview();assert(distance(normal.at(2,3),corrected.at(2,3))<.01f);
+ app.pickerHeightOverride=true;app.pickerZ=1.75f;assert(app.cameraPickerPreview().usable()&&distance(app.cameraPickerPreview().origin,normal.origin)>1);
+ auto chosen=app.cameraPickerPreview();options[1].camera.f[0]=NAN; // Original source/copy may already be overwritten.
+ app.failCameraPicker(ErrorId::CameraChoiceExpired);assert(app.status.find("[SS-GRID-012]")==0);
+ assert(app.adoptCameraPreview()); // Explicit confirmation uses exactly the preview, without a live source.
+ assert(app.gridConfirmed&&app.gridPinned&&!app.cameraPickerOpen&&!app.gridFromGame&&app.cameraOptions.empty()&&app.gridDirections==directions&&app.gridPlaneOverride&&app.gridPlaneZ==7);
+ assert(app.status.find("[SS-")==std::string::npos&&distance(app.document.marks[0].points[0],mark.points[0])<.001f);
+ for(int x=-2;x<=4;++x)for(int y=-2;y<=4;++y)assert(distance(app.grid.at(float(x),float(y)),chosen.at(float(x),float(y)))<.001f);
+ app.setEditing(false);app.setEditing(true);assert(app.gridPinned&&app.gridConfirmed&&!app.gridRefresh.requested);
+ assert(distance(app.grid.at(2,3),chosen.at(2,3))<.001f);frame(app);
+ app.tool=Kind::Pin;Point cursor{1103,743};click(app,cursor);assert(app.document.marks.size()==2&&distance(app.document.marks.back().points[0],chosen.snap(cursor))<.01f);
+ LevelIdentity first{21,8,7,{0,0,0},"first"},second=first;second.name="second";
+ for(uint64_t time:{0,200,400,600})app.observeLevel(&first,time);
+ app.observeLevel(nullptr,800);assert(app.gridPinned&&!app.gridConfirmed&&app.levelPaused);
+ app.observeLevel(&first,1000);assert(app.gridPinned&&app.gridConfirmed&&!app.levelPaused&&!app.gridRefresh.requested);
+ for(uint64_t time:{1200,1400,1600,1800})app.observeLevel(&second,time);
+ assert(!app.gridPinned&&!app.gridConfirmed&&app.gridRefresh.requested&&app.document.marks.size()==2);
+ options[1]=options[0];
+ app.startCameraPicker();app.acceptCameraOptions(options,1920,1080);app.failCameraPicker(ErrorId::CameraChoiceExpired);
+ assert(app.cameraPickerOpen&&app.cameraPickerPreview().usable());
+ app.startCameraPicker();assert(app.cameraOptions.empty()&&app.pickerCollecting);
+ app.acceptCameraOptions({},1920,1080);assert(!app.adoptCameraPreview()&&app.status.find("[SS-GRID-010]")==0);
+ frame(app);key(app,ImGuiKey_Escape);assert(!app.cameraPickerOpen&&app.editing&&app.gridDirections==directions&&app.document.marks.size()==2);
+ app.startCameraPicker();app.acceptCameraOptions(options,1920,1080);app.resize(1280,720);assert(!app.cameraPickerOpen&&app.cameraOptions.empty()&&app.gridRefresh.requested&&!app.gridConfirmed);
+ app.startCameraPicker();app.setEditing(false);assert(!app.cameraPickerOpen&&app.cameraOptions.empty());
+}
+void pinnedGridRecovery(){
+ App app;app.resize(1920,1080);app.setEditing(true);
+ CameraOption option;option.camera=gameCameraFixture();option.suggestedZ=1;
+ auto adopt=[&](){app.startCameraPicker();app.acceptCameraOptions({option},1920,1080);assert(app.adoptCameraPreview());frame(app);};
+ adopt();auto original=app.grid;auto adoptions=app.cameraPreviewAdoptions;
+ Mark mark;mark.kind=Kind::Pin;mark.points={{1450,800}};app.document.add(mark);
+ auto preserved=[&](){assert(app.gridPinned&&app.gridConfirmed&&app.snappingReady()&&!app.cameraPickerOpen&&!app.pickerPreviousPinned&&!app.pickerPreviousGrid.valid);
+  assert(distance(app.grid.at(2,3),original.at(2,3))<.001f&&app.cameraPreviewAdoptions==adoptions&&app.document.marks.size()==1);};
+ // Refreshing the list must not replace the backup with an empty preview.
+ app.startCameraPicker();app.startCameraPicker();app.acceptCameraOptions({},1920,1080);app.cancelCameraPicker();preserved();
+ app.startCameraPicker();frame(app);key(app,ImGuiKey_Escape);preserved();
+ app.startCameraPicker();app.setEditing(false);preserved();app.setEditing(true);assert(!app.gridRefresh.requested);frame(app);
+ // Explicit relocalization and resize invalidate the backup as well as the current pin.
+ app.startCameraPicker();app.requestGrid();assert(!app.gridPinned&&!app.pickerPreviousPinned&&app.gridRefresh.requested);app.cancelCameraPicker();assert(!app.gridPinned);
+ adopt();app.startCameraPicker();app.resize(1280,720);assert(!app.gridPinned&&!app.pickerPreviousPinned&&!app.cameraPickerOpen&&app.gridRefresh.requested);
+ app.resize(1920,1080);adopt();adoptions=app.cameraPreviewAdoptions;
+ LevelIdentity first{21,8,7,{0,0,0},"first"},second=first;second.name="second";
+ for(uint64_t time:{0,200,400,600})app.observeLevel(&first,time);
+ // A loading sample closes the picker but keeps its prior pin paused.
+ app.startCameraPicker();app.observeLevel(nullptr,800);assert(app.gridPinned&&!app.gridConfirmed&&app.levelPaused&&!app.snappingReady()&&!app.cameraPickerOpen);
+ frame(app);
+ app.gridEnabled=false;key(app,ImGuiKey_G);app.tint=false;key(app,ImGuiKey_T);
+ assert(app.gridPinned&&app.gridEnabled&&app.tint&&!app.gridRefresh.requested&&!app.snappingReady());
+ // Even an accidental confirmed flag cannot bypass the level pause for placement.
+ app.gridConfirmed=true;app.tool=Kind::Pin;Point cursor{1123,743};assert(distance(original.snap(cursor),cursor)>1);
+ click(app,cursor);assert(app.document.marks.size()==2&&distance(app.document.marks.back().points[0],cursor)<.001f);
+ app.gridFromGame=true;app.gameGridBase=original;auto direction=app.gridDirection;app.adjustGridDirection(direction^1);app.confirmGridDirection();assert(app.gridDirection==direction);
+ app.observeLevel(&first,1000);assert(app.gridPinned&&app.gridConfirmed&&!app.levelPaused&&!app.gridRefresh.requested);
+ // Closing a zero-size viewport finishes an active grouped gesture once and retains geometry/history.
+ app.tool=Kind::Number;auto&io=ImGui::GetIO();io.AddMousePosEvent(1100,730);frame(app);io.AddMouseButtonEvent(0,true);frame(app);assert(app.numbering);
+ auto count=app.document.marks.size(),history=app.document.undoStack.size();frame(app,0,0);assert(!app.numbering&&app.document.undoStack.size()==history+1);
+ frame(app,0,0);assert(app.document.undoStack.size()==history+1);io.AddMouseButtonEvent(0,false);frame(app);
+ assert(app.document.marks.size()==count&&app.gridPinned&&app.gridConfirmed&&distance(app.grid.at(2,3),original.at(2,3))<.001f);
+ app.startCameraPicker();for(uint64_t time:{1200,1400,1600,1800})app.observeLevel(&second,time);
+ assert(!app.gridPinned&&!app.pickerPreviousPinned&&!app.cameraPickerOpen&&app.gridRefresh.requested);
+ // Tiny positive viewports also produce finite UI geometry, including the picker and settings.
+ app.startCameraPicker();app.settingsOpen=true;frame(app,8,8);
+ for(auto list:ImGui::GetDrawData()->CmdLists)for(auto vertex:list->VtxBuffer)assert(std::isfinite(vertex.pos.x)&&std::isfinite(vertex.pos.y));
+ app.setEditing(false);
+}
 void interactions(){
  ImGui::CreateContext();auto&io=ImGui::GetIO();io.IniFilename=nullptr;io.LogFilename=nullptr;io.ConfigInputTrickleEventQueue=false;io.Fonts->AddFontDefault();unsigned char* pixels;int w,h;io.Fonts->GetTexDataAsRGBA32(&pixels,&w,&h);
  App app;frame(app);key(app,ImGuiKey_E);assert(app.editing&&app.gridRefresh.requested);
  // Every default has one owner; modifiers match exactly (G is independent of Shift+G).
  for(int i=0;i<int(Action::Count);++i)assert(app.bindings.conflict(static_cast<Action>(i),app.bindings.get(static_cast<Action>(i)))==-1);
- key(app,ImGuiKey_G,ImGuiMod_Shift);assert(app.manual&&app.gridEnabled);assert(!app.tint);
- key(app,ImGuiKey_Escape);assert(!app.manual&&app.editing);
+ key(app,ImGuiKey_G,ImGuiMod_Shift);assert(app.cameraPickerOpen&&app.gridEnabled);assert(!app.tint);
+ key(app,ImGuiKey_Escape);assert(!app.cameraPickerOpen&&app.editing);
  app.gridEnabled=false;key(app,ImGuiKey_G,ImGuiMod_Ctrl);assert(!app.gridEnabled);key(app,ImGuiKey_G);assert(app.gridEnabled);
  app.gridRefresh.cancel();app.gridConfirmed=true;app.grid.valid=true;app.grid.origin={600,400};app.grid.u={80,0};app.grid.v={0,80};
  // A shared swatch supplies new stars, arrows and pen marks; later edits preserve existing marks.
@@ -134,7 +246,31 @@ void interactions(){
  sample.kind=Kind::Pin;app.document.marks={sample};frame(app);bool red=false,gold=false,shadow=false;
  std::set<uint32_t> starColors={0,0xff,IM_COL32(23,18,12,0),IM_COL32(76,61,39,0),IM_COL32(224,192,114,0),IM_COL32(255,232,158,0),IM_COL32(232,202,132,0),IM_COL32(126,89,40,0),IM_COL32(181,143,73,0)};
  for(auto vertex:ImGui::GetBackgroundDrawList()->VtxBuffer){auto rgb=vertex.col&0xffffff;assert(starColors.count(rgb));red=red||rgb==0xff;gold=gold||rgb==(IM_COL32(224,192,114,0)&0xffffff);shadow=shadow||rgb==IM_COL32(23,18,12,0);}assert(red&&gold&&shadow);
- numberingInteractions();ImGui::DestroyContext();
+ numberingInteractions();
+ directionInteractions();
+ pickerInteractions();
+ pinnedGridRecovery();
+ App updates;updates.setEditing(true);frame(updates);frame(updates);
+ auto greenVertices=[](){size_t count=0;auto color=ImGui::ColorConvertFloat4ToU32({.43f,.89f,.56f,1});
+  for(auto list:ImGui::GetDrawData()->CmdLists)for(auto vertex:list->VtxBuffer)if(vertex.col==color)++count;return count;
+ };
+ assert(greenVertices()==0);ReleaseVersion newer;assert(ReleaseVersion::parse("0.2.2",newer));updates.availableUpdate=newer.packed();
+ frame(updates);frame(updates);assert(greenVertices()>0);
+ updates.settingsOpen=true;frame(updates);assert(greenVertices()>0);updates.settingsOpen=false;
+ updates.availableUpdate=0;frame(updates);frame(updates);assert(greenVertices()==0); // Network failure/no update adds no UI.
+ auto grayVertices=[](){size_t count=0;auto color=ImGui::ColorConvertFloat4ToU32({.60f,.60f,.60f,1});
+  for(auto list:ImGui::GetDrawData()->CmdLists)for(auto vertex:list->VtxBuffer)if(vertex.col==color)++count;return count;
+ };
+ assert(grayVertices()==0);updates.gameBuildWarning=ErrorId::UnsupportedGameBuild;
+ updates.grid.valid=true;updates.grid.origin={600,300};updates.grid.u={60,0};updates.grid.v={0,60};
+ updates.gridConfirmed=updates.gridFromGame=true;updates.gridRefresh.finish();updates.status="localized";
+ frame(updates);frame(updates);assert(grayVertices()>0&&updates.gridConfirmed&&updates.gridFromGame&&updates.status=="localized");
+ updates.requestGrid();assert(updates.gameBuildWarning==ErrorId::UnsupportedGameBuild&&updates.gridRefresh.requested);
+ updates.rejectGameGrid(ErrorId::CameraNotFound);frame(updates);assert(grayVertices()>0&&updates.status==errorMessage(ErrorId::CameraNotFound));
+ updates.startCameraPicker();frame(updates);assert(grayVertices()>0&&updates.cameraPickerOpen);
+ updates.settingsOpen=true;frame(updates);assert(grayVertices()>0);updates.settingsOpen=false;
+ updates.gameBuildWarning=ErrorId::None;frame(updates);frame(updates);assert(grayVertices()==0);
+ ImGui::DestroyContext();
 }
 }
 int main(){
@@ -162,7 +298,7 @@ int main(){
  assert(app.document.undo()&&app.document.marks.empty());assert(app.document.redo());
  assert(distance(app.document.marks[0].points[0],{640,360})<.001f);
  // Choosing manual calibration while automatic localization is pending wins immediately.
- app.gridRefresh.pending=true;app.startManual();assert(app.manual&&!app.gridRefresh.requested&&!app.gridRefresh.pending);
+ app.gridRefresh.pending=true;app.startCameraPicker();assert(app.cameraPickerOpen&&!app.gridRefresh.requested&&!app.gridRefresh.pending);
  // Continuous resizing coalesces; later requests cannot revive a previous viewport's result.
  GridRefresh refresh;refresh.request(true,100);assert(!refresh.ready(349)&&refresh.ready(350));
  refresh.pending=true;refresh.request(true,200);assert(!refresh.pending&&!refresh.ready(449));
@@ -194,8 +330,9 @@ int main(){
  }
  failed.rejectGameGrid(ErrorId::None);assert(failed.status==errorMessage(ErrorId::UnknownGameGrid));
  failed.rejectGameGrid(static_cast<ErrorId>(-1));assert(failed.status==errorMessage(ErrorId::UnknownGameGrid));
- failed.startManual();assert(failed.manual&&!failed.gridRefresh.requested&&failed.status.find("[SS-")==std::string::npos);
+ failed.startCameraPicker();assert(failed.cameraPickerOpen&&!failed.gridRefresh.requested&&failed.status.find("[SS-")==std::string::npos);
  assert(failed.document.undo()&&failed.document.marks.empty());assert(failed.document.redo());
+ failed.cancelCameraPicker();failed.grid=Grid::fromQuad({{600,280},{1300,320},{1400,920},{500,860}},8,7);
  Detection invalid;failed.acceptDetection(invalid);assert(failed.status==errorMessage(ErrorId::ImageGridUnreliable));
  Detection candidate;candidate.grid=failed.grid;candidate.grid.confidence=.2f;
  failed.acceptDetection(candidate);assert(failed.status==errorMessage(ErrorId::ImageGridUnconfirmed)&&!failed.gridConfirmed);

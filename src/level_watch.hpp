@@ -14,7 +14,8 @@ struct LevelIdentity {
 inline bool operator==(const LevelIdentity&a,const LevelIdentity&b){return a.settingsId==b.settingsId&&a.columns==b.columns&&a.rows==b.rows&&a.corner==b.corner&&a.name==b.name;}
 inline bool operator!=(const LevelIdentity&a,const LevelIdentity&b){return !(a==b);}
 
-// Caller MUST verify the executable fingerprint before using these r67271 offsets.
+// These r67271 offsets are attempted on unverified builds as well. The caller
+// reports the fingerprint mismatch; all runtime layout/stability checks apply.
 // The injected reader also lets tests exercise the exact runtime validation without game data.
 template<class Read> bool readValidatedLevel(Read read,uintptr_t image,LevelIdentity& output){
  auto get=[&](uintptr_t address,auto& value){return address>0x10000&&read(address,&value,sizeof(value));};

@@ -13,6 +13,7 @@
 #include "ui_glyphs.hpp"
 #include "game_grid.hpp"
 #include "preferences.hpp"
+#include "update_check.hpp"
 #include <atomic>
 #include <mutex>
 #include <map>
@@ -28,8 +29,14 @@ HMODULE ownModule=nullptr,realDxgi=nullptr;std::recursive_mutex renderMutex;std:
 ULONGLONG lastMouseMessage[3]{};std::atomic<bool> editing{false};HIMC savedImeContext=nullptr;bool imeDetached=false;sketch::App app;sketch::GameGridReader gameGrid;sketch::PreferenceStore preferences;WNDPROC previousWndProc=nullptr;HWND gameWindow=nullptr;
 std::wstring basePath(){wchar_t buffer[32768];DWORD n=GetModuleFileNameW(ownModule,buffer,32768);std::wstring path(buffer,n);return path.substr(0,path.find_last_of(L"\\/")+1);}
 void log(const char*fmt,...){char line[2048];va_list args;va_start(args,fmt);vsnprintf(line,sizeof(line),fmt,args);va_end(args);std::wstring path=basePath()+L"StarSketch.log";HANDLE file=CreateFileW(path.c_str(),FILE_APPEND_DATA,FILE_SHARE_READ|FILE_SHARE_WRITE,nullptr,OPEN_ALWAYS,FILE_ATTRIBUTE_NORMAL,nullptr);if(file!=INVALID_HANDLE_VALUE){DWORD done;WriteFile(file,line,(DWORD)strlen(line),&done,nullptr);WriteFile(file,"\r\n",2,&done,nullptr);CloseHandle(file);}}
+void logGridFailure(UINT64 width,UINT height){
+ auto id=gameGrid.error==sketch::ErrorId::None?sketch::ErrorId::UnknownGameGrid:gameGrid.error;
+ SYSTEMTIME utc{};GetSystemTime(&utc);auto request=static_cast<unsigned long long>(gameGrid.requestId());DWORD pid=GetCurrentProcessId();
+ log("%s | Game grid unavailable: %s viewport=%llux%u grid_request=%llu pid=%lu utc=%04u-%02u-%02uT%02u:%02u:%02u.%03uZ",app.status.c_str(),gameGrid.diagnostic.c_str(),static_cast<unsigned long long>(width),height,request,pid,unsigned(utc.wYear),unsigned(utc.wMonth),unsigned(utc.wDay),unsigned(utc.wHour),unsigned(utc.wMinute),unsigned(utc.wSecond),unsigned(utc.wMilliseconds));
+ for(const auto& line:gameGrid.failureDetails())log("[%s] grid_request=%llu pid=%lu %s",sketch::errorInfo(id).code,request,pid,line.c_str());
+}
 void require(HRESULT hr,const char*what){if(FAILED(hr)){log("[SS-DX12-001] %s: HRESULT=0x%08lx",what,(unsigned long)hr);throw std::runtime_error(what);}}
-void systemDxgi(){static std::once_flag once;std::call_once(once,[]{wchar_t path[MAX_PATH];GetSystemDirectoryW(path,MAX_PATH);wcscat_s(path,L"\\dxgi.dll");realDxgi=LoadLibraryW(path);log("StarSketch 0.2.0 | independent DX12 overlay | system DXGI loaded=%d",realDxgi!=nullptr);});}
+void systemDxgi(){static std::once_flag once;std::call_once(once,[]{wchar_t path[MAX_PATH];GetSystemDirectoryW(path,MAX_PATH);wcscat_s(path,L"\\dxgi.dll");realDxgi=LoadLibraryW(path);log("StarSketch %s | camera diagnostics 20261026 | camera picker preview adopt 20261026 | independent DX12 overlay | system DXGI loaded=%d",sketch::CurrentVersion,realDxgi!=nullptr);});}
 template<class T>T real(const char*name){systemDxgi();return reinterpret_cast<T>(GetProcAddress(realDxgi,name));}
 void patch(void**slot,void*replacement){DWORD old;if(!VirtualProtect(slot,sizeof(void*),PAGE_READWRITE,&old))throw std::runtime_error("VirtualProtect");InterlockedExchangePointer(slot,replacement);DWORD ignored;VirtualProtect(slot,sizeof(void*),old,&ignored);}
 void hook(void*object,size_t index,void*replacement){void**slot=(*reinterpret_cast<void***>(object))+index;std::lock_guard<std::mutex>lock(hookMutex);if(originals.count(slot))return;originals[slot]=*slot;patch(slot,replacement);}
@@ -117,32 +124,54 @@ public:
    renderWidth=desc.Width;renderHeight=desc.Height;
    ImGui_ImplDX12_NewFrame();ImGui_ImplWin32_NewFrame();ImGui::NewFrame();
    auto&io=ImGui::GetIO();app.resize(io.DisplaySize.x,io.DisplaySize.y);
+   // Process-lifetime state: workers hold a module reference and publish only an
+   // atomic numeric version. Network I/O and parsing never run on this thread.
+   static auto updateChecker=new sketch::RuntimeUpdateChecker;
+   app.availableUpdate=updateChecker->poll(sketch::GridRefresh::now());
    auto levelTime=sketch::GridRefresh::now();if(app.levelWatch.due(levelTime)){
     sketch::LevelIdentity identity;bool available=gameGrid.readCurrentLevel(identity);
     if(app.observeLevel(available?&identity:nullptr,levelTime))log("Level change confirmed: logical=%dx%d auto_clear=%d",identity.columns,identity.rows,app.autoClearOnLevel?1:0);
    }
+   auto warning=gameGrid.buildWarning();if(app.gameBuildWarning!=warning){
+    app.gameBuildWarning=warning;if(warning!=sketch::ErrorId::None)log("%s | compatibility warning; continuing runtime layout and camera checks",sketch::errorMessage(warning).c_str());
+   }
    auto&refresh=app.gridRefresh;
-   if(refresh.ready()){
+   if(!app.cameraPickerOpen)gameGrid.cancelPicking();
+   if(app.cameraPickerOpen){
+    if(app.pickerRefreshRequested){
+     app.pickerRefreshRequested=false;
+     if(!gameGrid.beginPicking(float(desc.Width),float(desc.Height),app.gridPlaneZ)){app.failCameraPicker(gameGrid.error);logGridFailure(desc.Width,desc.Height);}
+     else log("Camera picker collection started: request=%llu",static_cast<unsigned long long>(gameGrid.requestId()));
+    }else if(app.pickerCollecting){
+     auto state=gameGrid.pollPicking();
+     if(state==sketch::GameGridState::Ready){app.acceptCameraOptions(gameGrid.pickerOptions(),float(desc.Width),float(desc.Height));log("Camera picker: request=%llu choices=%zu",static_cast<unsigned long long>(gameGrid.requestId()),app.cameraOptions.size());}
+     else if(state==sketch::GameGridState::Unavailable){app.failCameraPicker(gameGrid.error);logGridFailure(desc.Width,desc.Height);}
+    }
+   }else if(refresh.ready()){
+    gameGrid.cancelPicking();
     if(!refresh.pending){
      refresh.pending=gameGrid.begin(float(desc.Width),float(desc.Height),app.gridPlaneOverride,app.gridPlaneZ);
      log("Game grid localization started: %llux%u",(unsigned long long)desc.Width,desc.Height);
      if(!refresh.pending){
       app.rejectGameGrid(gameGrid.error);
-      log("%s | Game grid unavailable: %s viewport=%llux%u",app.status.c_str(),gameGrid.diagnostic.c_str(),(unsigned long long)desc.Width,desc.Height);
+      logGridFailure(desc.Width,desc.Height);
      }
     }else{
      sketch::Grid projected;auto state=gameGrid.poll(projected);
      if(state==sketch::GameGridState::Ready){
-      app.grid=projected;app.gridConfirmed=true;app.gridFromGame=true;app.gridPlaneZ=gameGrid.planeZ;refresh.finish();
-      app.status=app.gridPlaneOverride?"已按游戏数据定位，使用指定高度层":"已按游戏数据定位，使用当前角色所在高度层";
-      log("Game grid: %s",gameGrid.diagnostic.c_str());
+      app.acceptGameGrid(projected,gameGrid.directionCategory,float(desc.Width),float(desc.Height),gameGrid.planeZ);
+      log("%sGame grid: %s direction_choice=%d direction_confirmed=%d",app.gridDirectionPending?"[SS-GRID-011] ":"",gameGrid.diagnostic.c_str(),app.gridDirection,app.gridConfirmed?1:0);
      }else if(state==sketch::GameGridState::Unavailable){
       app.rejectGameGrid(gameGrid.error);
-      log("%s | Game grid unavailable: %s viewport=%llux%u",app.status.c_str(),gameGrid.diagnostic.c_str(),(unsigned long long)desc.Width,desc.Height);
+      logGridFailure(desc.Width,desc.Height);
      }
     }
    }
-   bool settingsWereOpen=app.settingsOpen;app.editing=editing.load();app.frame(io.DisplaySize.x,io.DisplaySize.y);
+   bool settingsWereOpen=app.settingsOpen;int previousDirection=app.gridDirection;bool directionWasConfirmed=app.gridConfirmed;
+   auto previousAdoptions=app.cameraPreviewAdoptions;int selectedCamera=app.selectedCamera;
+   app.editing=editing.load();app.frame(io.DisplaySize.x,io.DisplaySize.y);
+   if(app.cameraPreviewAdoptions!=previousAdoptions)log("Camera picker preview adopted: candidate=%d flip=%d pinned=1 snapping=%d",selectedCamera+1,app.pickerFlip,app.snappingReady()?1:0);
+   if(app.gridFromGame&&(previousDirection!=app.gridDirection||directionWasConfirmed!=app.gridConfirmed))log("Grid direction: category=%d choice=%d confirmed=%d",app.gridDirectionCategory,app.gridDirection,app.gridConfirmed?1:0);
    auto preferenceError=preferences.update(app,sketch::GridRefresh::now(),settingsWereOpen&&!app.settingsOpen);if(preferenceError!=sketch::ErrorId::None)log("%s",sketch::errorMessage(preferenceError).c_str());
    if(app.editing!=editing.load())setEditing(app.editing);
    if(app.inputError!=sketch::ErrorId::None){log("%s | %s",sketch::errorMessage(app.inputError).c_str(),app.bindingStatus.c_str());app.inputError=sketch::ErrorId::None;}
