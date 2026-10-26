@@ -2,7 +2,7 @@
 param([string]$InstallerArchive,[string]$LegacyInstallerArchive,[string]$LegacyManualArchive)
 $ErrorActionPreference='Stop';Set-StrictMode -Version 2
 $root=Split-Path -Parent $PSScriptRoot
-if(!$InstallerArchive){$InstallerArchive=Join-Path $root 'dist\StarSketch-0.2.1-installer.zip'}
+if(!$InstallerArchive){$InstallerArchive=Join-Path $root 'dist\StarSketch-0.2.2-installer.zip'}
 if(!$LegacyInstallerArchive){$LegacyInstallerArchive=Join-Path $root 'dist\StarSketch-0.1.2-installer.zip'}
 if(!$LegacyManualArchive){$LegacyManualArchive=Join-Path $root 'dist\StarSketch-0.1.2-r67271-test.zip'}
 function Assert([bool]$Condition,[string]$Message){if(!$Condition){throw "FAIL: $Message"}}

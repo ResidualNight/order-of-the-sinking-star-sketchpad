@@ -263,10 +263,11 @@ void App::cameraPickerPanel(float w,float h){
   ImGui::BeginDisabled(pickerCollecting||settingsOpen);
   if(!cameraOptions.empty()){
    if(ImGui::BeginChild("##cameraChoices",{0,132*s},ImGuiChildFlags_Borders)){
-    for(size_t i=0;i<cameraOptions.size();++i){char label[100];std::snprintf(label,sizeof(label),"候选 %zu%s",i+1,cameraOptions[i].directionCategory?"（方向异常）":"");
+    for(size_t i=0;i<cameraOptions.size();++i){char label[100];std::snprintf(label,sizeof(label),"候选 %zu%s",i+1,auxiliaryCamera(cameraOptions[i].camera.sourceType())?"（辅助视图）":cameraOptions[i].directionCategory?"（方向异常）":"");
      if(ImGui::Selectable(label,selectedCamera==int(i)))selectCamera(int(i));
     }
    }ImGui::EndChild();
+   if(auto option=selectedCameraOption();option&&auxiliaryCamera(option->camera.sourceType()))ImGui::TextWrapped("辅助视图可能与画面不一致，请检查翻转和高度后再采用。");
    if(ImGui::Button("上一项"))selectCamera((selectedCamera+int(cameraOptions.size())-1)%int(cameraOptions.size()));
    ImGui::SameLine();if(ImGui::Button("下一项"))selectCamera((selectedCamera+1)%int(cameraOptions.size()));
    bool horizontal=(pickerFlip&1)!=0,vertical=(pickerFlip&2)!=0;

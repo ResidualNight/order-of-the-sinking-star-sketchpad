@@ -11,7 +11,7 @@ struct CameraEvidence {
  CameraReject reason=CameraReject::None;CameraStage stage=CameraStage::Scan;
  float renderW=0,renderH=0,norm=0,time=0,map=0,inverse=0,projection=0,directionZ=0;
  double depth=0,handedness=0,worldUp=0;
- uint32_t frame=0,advance=0;uint8_t directionCategory=0;float seconds=0;int badIndex=-1;float badValue=0;unsigned long readError=0;
+ uint32_t frame=0,advance=0,sourceType=0;uint8_t directionCategory=0;float seconds=0;int badIndex=-1;float badValue=0;unsigned long readError=0;
  bool hasCamera=false;
 };
 struct CameraDiagnostics {
@@ -39,7 +39,7 @@ struct CameraDiagnostics {
   CameraEvidence item;item.stage=stage;item.reason=check.reason;item.advance=advance;item.seconds=seconds;item.readError=readError;item.badIndex=check.badIndex;item.badValue=check.badValue;
   if(camera){item.hasCamera=true;const auto& f=camera->f;
    item.renderW=f[216]>0?1/f[216]:NAN;item.renderH=f[217]>0?1/f[217]:NAN;
-   item.frame=camera->frame();item.time=f[211];item.map=f[235];item.directionZ=f[214];
+   item.frame=camera->frame();item.sourceType=camera->sourceType();item.time=f[211];item.map=f[235];item.directionZ=f[214];
    item.norm=f[212]*f[212]+f[213]*f[213]+f[214]*f[214];
    item.inverse=matrixInverseError(f.data(),f.data()+16);item.projection=matrixInverseError(f.data()+176,f.data()+192);
    auto orientation=cameraOrientation(*camera);item.depth=orientation.depth;item.handedness=orientation.handedness;item.worldUp=orientation.worldUp;item.directionCategory=orientation.category;
@@ -70,10 +70,10 @@ struct CameraDiagnostics {
    result.push_back(line);
   }
   result.push_back("viewport_probe checks="+std::to_string(probeChecks)+" skipped_budget="+std::to_string(probeSkipped)+" per_scan_limit="+std::to_string(ProbeBudget));
-  result.push_back("limits abs_value<=1e7 output=640..16384x360..16384 render=160..16385x90..16385 viewport_tolerance_px=1 modes=native,half,720p,1080p,1440p,2160p direction_norm2=0.94..1.06 frame>0 time>=0 map<=0.05 inverse_error<0.025 forward_depth>0.1 direction_z<-0.05 handedness>0 world_up>0 direction_only=manual_preview normal_preferred=1 fresh_frames=1..2000 fresh_seconds=0..5");
+  result.push_back("limits abs_value<=1e7 output=640..16384x360..16384 render=160..16385x90..16385 viewport_tolerance_px=1 modes=native,half,quarter,720p,1080p,1440p,2160p reflection_parent_scale=half,quarter aux_auto=off captured_age_ms<=250 history<=512 direction_norm2=0.94..1.06 frame>0 time>=0 map<=0.05 inverse_error<0.025 forward_depth>0.1 direction_z<-0.05 handedness>0 world_up>0 direction_only=manual_preview normal_preferred=1 fresh_frames=1..2000 fresh_seconds=0..5");
   for(size_t i=0;i<sampleCount;++i){const auto&s=samples[i];char line[1000];
    std::snprintf(line,sizeof(line),"sample=%zu stage=%s reason=%s has_camera=%d render=%.6fx%.6f frame=%u time=%.9g direction_norm2=%.9g map=%.9g inverse_error=%.9g projection_error=%.9g forward_depth=%.9g direction_z=%.9g handedness=%.9g world_up=%.9g advance=%u seconds=%.9g bad_index=%d bad_value=%.9g read_error=0x%lx",i,CameraStageNames[size_t(s.stage)],CameraRejectNames[size_t(s.reason)],s.hasCamera?1:0,s.renderW,s.renderH,s.frame,s.time,s.norm,s.map,s.inverse,s.projection,s.depth,s.directionZ,s.handedness,s.worldUp,s.advance,s.seconds,s.badIndex,s.badValue,s.readError);
-   result.emplace_back(std::string(line)+" direction_category="+std::to_string(s.directionCategory));
+    result.emplace_back(std::string(line)+" direction_category="+std::to_string(s.directionCategory)+" source_type="+std::to_string(s.sourceType)+" source="+(s.hasCamera?cameraSourceName(s.sourceType):"unavailable"));
   }
   return result;
  }

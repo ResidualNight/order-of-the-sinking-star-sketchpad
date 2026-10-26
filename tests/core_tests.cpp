@@ -3,6 +3,7 @@
 #include "camera_grid.hpp"
 #include "camera_picker.hpp"
 #include "camera_fixture.hpp"
+#include "quarter_camera_fixture.hpp"
 #include "level_watch_tests.hpp"
 #include "camera_diagnostics_tests.hpp"
 #include <iostream>
@@ -79,11 +80,25 @@ void checkCameraOrientation(const CameraFrame& captured){
  assert(cameraCandidatePreferred(CameraValidation::Valid,1,CameraValidation::Valid,0xffffffff));
 }
 void checkCameraRenderScale(const CameraFrame& captured){
- for(Point output:std::vector<Point>{{3840,2160},{3200,1800},{2560,1440},{1920,1080},{1280,720},{640,360},{3440,1440},{1365,767}}){
+ const std::vector<Point> outputs={{640,360},{1024,768},{1280,720},{1280,800},{1365,767},{1366,768},{1600,900},
+  {1920,1080},{1920,1200},{2560,1080},{2560,1440},{2560,1600},{3200,1800},{3440,1440},{3840,1600},
+  {3840,2160},{5120,1440},{5120,2160},{5120,2880},{7680,2160},{7680,4320},{1080,1920},{16384,9216}};
+ size_t checked=0;
+ for(Point output:outputs){
   auto native=resizedCamera(captured,output.x,output.y);
-  for(float internalHeight:{std::floor(output.y*.5f),720.f,1080.f,1440.f,2160.f}){
-   float internalWidth=internalHeight==std::floor(output.y*.5f)?std::floor(output.x*.5f):std::floor(output.x*internalHeight/output.y);
-   auto scaled=native;scaled.f[216]=1/internalWidth;scaled.f[217]=1/internalHeight;
+  std::vector<Point> internalSizes;
+  // Test the size relation independently of one sample resolution, including
+  // fractional reciprocals and both integer rounding directions on each axis.
+  for(float scale:{1.f,.5f,.25f}){
+   internalSizes.push_back({output.x*scale,output.y*scale});
+   for(bool upX:{false,true})for(bool upY:{false,true})internalSizes.push_back({
+    upX?std::ceil(output.x*scale):std::floor(output.x*scale),
+    upY?std::ceil(output.y*scale):std::floor(output.y*scale)});
+  }
+  for(float internalHeight:{720.f,1080.f,1440.f,2160.f})
+   for(bool roundUp:{false,true})internalSizes.push_back({roundUp?std::ceil(output.x*internalHeight/output.y):std::floor(output.x*internalHeight/output.y),internalHeight});
+  for(auto internal:internalSizes){
+   ++checked;auto scaled=native;scaled.f[216]=1/internal.x;scaled.f[217]=1/internal.y;
    assert(validCamera(scaled,output.x,output.y));
    for(float z:{0.f,1.f,1.75f}){
     auto expected=gridFromCamera(native,output.x,output.y,z),actual=gridFromCamera(scaled,output.x,output.y,z);
@@ -93,12 +108,17 @@ void checkCameraRenderScale(const CameraFrame& captured){
    for(int axes=1;axes<=3;++axes)assert(!validCamera(reflectedCamera(scaled,(axes&1)!=0,(axes&2)!=0),output.x,output.y));
    auto map=scaled;map.f[235]=1;assert(!validCamera(map,output.x,output.y));
   }
-  for(float unknownHeight:{777.f,1499.f,4320.f}){
+  // 4320 is native at the 8K output above, so it is not an unknown mode.
+  for(float unknownHeight:{777.f,1499.f,5003.f}){
    auto unsupported=native;unsupported.f[216]=1/(output.x*unknownHeight/output.y);unsupported.f[217]=1/unknownHeight;
    assert(!validCamera(unsupported,output.x,output.y));
   }
   auto half=native;half.f[216]=2/output.x;half.f[217]=2/output.y;
   auto stretched=half;stretched.f[217]=native.f[217];assert(!validCamera(stretched,output.x,output.y));
+  auto quarter=native;quarter.f[216]=4/output.x;quarter.f[217]=4/output.y;
+  quarter.f[216]=1/(output.x*.25f+2);assert(!validCamera(quarter,output.x,output.y));
+  quarter=native;quarter.f[216]=4/output.x;quarter.f[217]=1/(output.y*.25f+2);
+  assert(!validCamera(quarter,output.x,output.y));
  }
  // The reported output remained 3200x1800 while these internal settings changed.
  for(Point internal:std::vector<Point>{{3200,1800},{1600,900},{1280,720},{1920,1080},{2560,1440},{3840,2160}})
@@ -107,6 +127,44 @@ void checkCameraRenderScale(const CameraFrame& captured){
  assert(!cameraViewportMatches(1/3200.f,1/1800.f,3840,2160));
  assert(!cameraViewportMatches(1/1920.f,1/1080.f,1920,1200)); // Different aspect.
  assert(!cameraViewportMatches(1/1920.f,1/1080.f,1e30f,1e30f));
+ // Quarter viewport support must not admit arbitrary ratios, stretching, or
+ // bypass numeric/orientation checks seen beside it in the affected log.
+ assert(cameraViewportMatches(1/960.f,1/540.f,3840,2160));
+ assert(!cameraViewportMatches(1/480.f,1/270.f,3840,2160));
+ assert(!cameraViewportMatches(1/640.f,1/360.f,3840,2160));
+ assert(!cameraViewportMatches(1/320.f,1/180.f,3840,2160)); // Auxiliary ratios aren't an automatic whitelist.
+ auto reflection=quarterCameraFixture();uint32_t reflectionType=5;std::memcpy(reflection.f.data()+226,&reflectionType,4);
+ for(Point internal:std::vector<Point>{{480,270},{640,360},{320,180}}){
+  reflection.f[216]=1/internal.x;reflection.f[217]=1/internal.y;
+  assert(inspectCamera(reflection,3840,2160).reason==CameraReject::Orientation);
+  assert(gridFromCamera(reflection,3840,2160,1,true).usable());
+  auto main=reflection;uint32_t mainType=8;std::memcpy(main.f.data()+226,&mainType,4);
+  assert(inspectCamera(main,3840,2160).reason==CameraReject::Viewport);
+ }
+ assert(!cameraViewportMatches(1/768.f,1/432.f,3840,2160,true));
+ assert(!cameraViewportMatches(1/480.f,1/360.f,3840,2160,true));
+ assert(!cameraViewportMatches(1/960.f,1/1080.f,3840,2160));
+ assert(!cameraViewportMatches(1/960.f,1/540.f,3840,2400));
+ assert(!cameraViewportMatches(1/768.f,1/432.f,3840,2160));
+ auto quarter=quarterCameraFixture();
+ assert(inspectCamera(quarter,3840,2160).reason==CameraReject::Orientation);
+ assert(cameraOrientation(quarter).category==3&&!validCamera(quarter,3840,2160));
+ assert(!gridFromCamera(quarter,3840,2160,1).usable());
+ assert(gridFromCamera(quarter,3840,2160,1,true).usable());
+ auto broken=quarter;broken.f[178]=NAN;
+ assert(inspectCamera(broken,3840,2160).reason==CameraReject::CameraValues);
+ assert(!gridFromCamera(broken,3840,2160,1,true).usable());
+ broken=quarter;broken.f[176]+=1;
+ assert(inspectCamera(broken,3840,2160).reason==CameraReject::ProjectionInverse);
+ assert(!gridFromCamera(broken,3840,2160,1,true).usable());
+ // Guard output and internal size boundaries independently of supported modes.
+ for(Point output:std::vector<Point>{{639,360},{640,359},{16385,2160},{3840,16385}})
+  assert(!cameraViewportMatches(1/output.x,1/output.y,output.x,output.y));
+ assert(!cameraViewportMatches(1/159.f,1/90.f,640,360));
+ assert(!cameraViewportMatches(1/160.f,1/89.f,640,360));
+ assert(!cameraViewportMatches(1/16386.f,1/9216.f,16384,9216));
+ std::cout<<"PASS: camera viewport matrix "<<outputs.size()<<" output sizes / "<<checked
+  <<" render-size cases, rounding, projection equivalence and invalid-size rejection\n";
 }
 }
 int main(){std::cout.setf(std::ios::unitbuf);

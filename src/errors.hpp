@@ -6,7 +6,7 @@ enum class ErrorId {
  None,UnsupportedGameBuild,EntityManagerUnavailable,SettingsArrayUnavailable,SettingsGridInvalid,
  ActorLayerUnavailable,FreshCameraFrameUnavailable,VisibleActorLayerUnavailable,LevelChanged,
  ProjectedGridInvalid,CameraNotFound,CameraOrientationInvalid,CameraChoiceExpired,UnknownGameGrid,ImageGridUnconfirmed,ImageGridUnreliable,
- UnsupportedCaptureFormat,InvalidCalibration,KeyBindingConflict,ConfigReadFailure,ConfigWriteFailure,Count
+ UnsupportedCaptureFormat,InvalidCalibration,KeyBindingConflict,ConfigReadFailure,ConfigWriteFailure,AuxiliaryCameraOnly,Count
 };
 struct ErrorInfo {const char* code;const char* diagnostic;const char* message;};
 inline constexpr ErrorInfo Errors[]={
@@ -30,7 +30,8 @@ inline constexpr ErrorInfo Errors[]={
  {"SS-CAL-001","invalid_calibration","校准点无效，请拖动四角调整或重新选择"},
  {"SS-INPUT-001","key_binding_conflict","该按键组合与现有分配冲突，请选择其他组合"},
  {"SS-CONFIG-001","preferences_read_failed","设置文件无法读取或格式无效，暂用默认设置；原文件保留，请检查文件权限或备份后重试"},
- {"SS-CONFIG-002","preferences_write_failed","设置未能保存到磁盘，本次游戏内仍有效；请检查文件权限和剩余空间"}
+ {"SS-CONFIG-002","preferences_write_failed","设置未能保存到磁盘，本次游戏内仍有效；请检查文件权限和剩余空间"},
+ {"SS-GRID-013","auxiliary_camera_only","只取得辅助视图，请返回普通游戏视角后重试，或临时选择相机并检查网格贴合"}
 };
 static_assert(sizeof(Errors)/sizeof(Errors[0])==static_cast<unsigned>(ErrorId::Count));
 inline const ErrorInfo& errorInfo(ErrorId id){

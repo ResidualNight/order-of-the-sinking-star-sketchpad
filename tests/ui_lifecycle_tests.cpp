@@ -136,8 +136,9 @@ void pickerInteractions(){
  for(int base:{0,192})for(int col=0;col<4;++col)options[1].camera.f[base+4+col]*=-1;
  for(int base:{16,176})for(int row=0;row<4;++row)options[1].camera.f[base+row*4+1]*=-1;
  options[1].directionCategory=6;
+ uint32_t auxiliaryType=5;std::memcpy(options[1].camera.f.data()+226,&auxiliaryType,4);
  app.acceptCameraOptions(options,1920,1080);assert(app.cameraOptions.size()==2&&app.selectedCamera==0&&!app.pickerCollecting&&!app.gridConfirmed);
- auto normal=app.cameraPickerPreview();assert(normal.usable());app.selectCamera(1);app.pickerFlip=2;
+ auto normal=app.cameraPickerPreview();assert(normal.usable());app.selectCamera(1);frame(app);app.pickerFlip=2;
  auto corrected=app.cameraPickerPreview();assert(distance(normal.at(2,3),corrected.at(2,3))<.01f);
  app.pickerHeightOverride=true;app.pickerZ=1.75f;assert(app.cameraPickerPreview().usable()&&distance(app.cameraPickerPreview().origin,normal.origin)>1);
  auto chosen=app.cameraPickerPreview();options[1].camera.f[0]=NAN; // Original source/copy may already be overwritten.
@@ -254,7 +255,7 @@ void interactions(){
  auto greenVertices=[](){size_t count=0;auto color=ImGui::ColorConvertFloat4ToU32({.43f,.89f,.56f,1});
   for(auto list:ImGui::GetDrawData()->CmdLists)for(auto vertex:list->VtxBuffer)if(vertex.col==color)++count;return count;
  };
- assert(greenVertices()==0);ReleaseVersion newer;assert(ReleaseVersion::parse("0.2.2",newer));updates.availableUpdate=newer.packed();
+ assert(greenVertices()==0);ReleaseVersion newer;assert(ReleaseVersion::parse(CurrentVersion,newer));++newer.parts[2];updates.availableUpdate=newer.packed();
  frame(updates);frame(updates);assert(greenVertices()>0);
  updates.settingsOpen=true;frame(updates);assert(greenVertices()>0);updates.settingsOpen=false;
  updates.availableUpdate=0;frame(updates);frame(updates);assert(greenVertices()==0); // Network failure/no update adds no UI.
@@ -314,6 +315,7 @@ int main(){
  }
  assert(std::string(errorInfo(ErrorId::FreshCameraFrameUnavailable).code)=="SS-GRID-006");
  assert(std::string(errorInfo(ErrorId::CameraNotFound).code)=="SS-GRID-010");
+ assert(std::string(errorInfo(ErrorId::AuxiliaryCameraOnly).code)=="SS-GRID-013");
  assert(std::string(errorInfo(ErrorId::CameraOrientationInvalid).code)=="SS-GRID-011");
  App failed;failed.resize(1920,1080);failed.document.add(pin);
  failed.grid=app.grid;failed.gridEnabled=true;failed.tint=true;

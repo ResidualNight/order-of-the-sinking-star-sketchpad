@@ -47,7 +47,9 @@ int main(int argc,char** argv){
  assert(newer.check("invalid")==0);
  ReleaseVersion unchanged;unchanged.parts={1,2,3};assert(!ReleaseVersion::parse("1.2.x",unchanged)&&unchanged.text()=="1.2.3");
  assert(updateNotice(0).empty()&&updateNotice(number("0.2.0")).empty()&&updateNotice(number("0.2.1")).empty());
- assert(updateNotice(number("0.2.2"))=="发现新版本 0.2.2，请退出游戏后使用安装器更新");
+ auto current=number(CurrentVersion);assert(updateNotice(current).empty());
+ auto nextVersion=ReleaseVersion::unpack(current);++nextVersion.parts[2];
+ assert(updateNotice(nextVersion.packed())=="发现新版本 "+nextVersion.text()+"，请退出游戏后使用安装器更新");
  assert(updateNotice(uint64_t(1)<<63).empty());
  UpdateCheckSchedule schedule;assert(schedule.due(100)&&!schedule.due(101)&&!schedule.due(100+UpdateCheckSchedule::IntervalMs-1));
  assert(schedule.due(100+UpdateCheckSchedule::IntervalMs));

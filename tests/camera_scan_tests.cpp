@@ -1,6 +1,7 @@
 #include "camera_scan.hpp"
 #include "camera_grid.hpp"
 #include "camera_fixture.hpp"
+#include "quarter_camera_fixture.hpp"
 #include "game_grid.hpp"
 #include <cassert>
 #include <iostream>
@@ -16,6 +17,27 @@ struct GameGridReaderTestAccess {
  }
  static void append(GameGridReader& reader,CameraFrame* camera){reader.candidates.push_back({reinterpret_cast<uintptr_t>(camera),camera->frame(),camera->f[211]});}
  static void finishCollection(GameGridReader& reader){reader.started=GetTickCount64()-GameGridReader::PickCollectMs;}
+ static void timeout(GameGridReader& reader){reader.started=GetTickCount64()-1801;}
+ static void expireCapture(GameGridReader& reader){reader.capturedAt=GetTickCount64()-GameGridReader::CaptureLifetimeMs-1;}
+ static void scanFixture(GameGridReader& reader,CameraFrame* memory){
+  ++reader.observationRound;reader.capturePrepared=true;
+  CameraScanStats stats;scanCameraStack(reinterpret_cast<uintptr_t>(memory),reinterpret_cast<uintptr_t>(memory)+960,[&](uintptr_t address,const unsigned char* data){
+   auto frame=std::make_unique<CameraFrame>();std::memcpy(frame->f.data(),data,960);
+   if(reader.acceptsCamera(*frame,CameraStage::Scan))reader.observeCamera(address,*frame,CameraStage::Scan);
+  },stats);assert(stats.bytes==960);
+ }
+ static void offer(GameGridReader& reader,uintptr_t address,const CameraFrame& frame){reader.offerChoice(address,frame);}
+ static size_t historySize(const GameGridReader& reader){return reader.observations.size();}
+ static size_t movedCount(const GameGridReader& reader){return reader.movedFresh;}
+ static void pressure(GameGridReader& reader,const CameraFrame& main){
+  auto auxiliary=std::make_unique<CameraFrame>(main);uint32_t type=5;std::memcpy(auxiliary->f.data()+226,&type,4);
+  for(size_t i=0;i<GameGridReader::MaxObservations+16;++i){++reader.observationRound;reader.observeCamera(0x300000+i,*auxiliary,CameraStage::Scan);}
+  assert(reader.observations.size()==GameGridReader::MaxObservations);
+  assert(std::any_of(reader.observations.begin(),reader.observations.end(),[](const auto& old){return old.frame->sourceType()==8;}));
+  reader.candidates.clear();for(size_t i=0;i<GameGridReader::PickMaxCandidates;++i)reader.rememberCandidate({0x400000+i,1,1,5});
+  reader.rememberCandidate({0x500000,1,1,8});
+  assert(reader.candidates.size()==GameGridReader::PickMaxCandidates&&std::any_of(reader.candidates.begin(),reader.candidates.end(),[](auto c){return c.sourceType==8;}));
+ }
 };
 }
 void checkAdvisoryBuild(){
@@ -72,6 +94,92 @@ void checkAdvisoryBuild(){
   next=camera->frame()+1;std::memcpy(camera->f.data()+225,&next,4);camera->f[211]+=.016f;*duplicate=*camera;
   GameGridReaderTestAccess::finishCollection(reader);assert(reader.pollPicking()==GameGridState::Ready&&reader.pickerOptions()[0].token!=options[0].token);
   reader.cancelPicking();assert(reader.pickerOptions().empty());
+  // Log-shaped scenario: a native-size copy is corrupt while a quarter-size
+  // category-3 view remains consistent. It must reach the same fresh-frame
+  // path in automatic and picker requests, without accepting the corrupt copy.
+  for(Point output:std::vector<Point>{{3840,2160},{3200,1800},{2560,1440},{1920,1080},{1920,1200},{3440,1440},{5120,1440},{1365,767}}){
+  *camera=quarterCameraFixture(output.x,output.y);*duplicate=gameCameraFixture();duplicate->f[178]=NAN;
+  duplicate->f[216]=1/output.x;duplicate->f[217]=1/output.y;
+  GameGridReaderTestAccess::fixture(reader,&managerSlot,verified,camera.get());GameGridReaderTestAccess::append(reader,duplicate.get());
+  assert(reader.begin(output.x,output.y,true,1));
+  assert(reader.poll(stale)==GameGridState::Waiting);
+  next=camera->frame()+1;std::memcpy(camera->f.data()+225,&next,4);camera->f[211]+=.016f;
+  assert(reader.poll(preview)==GameGridState::Ready&&preview.usable()&&reader.directionCategory==3);
+  if(output.x==3840&&output.y==2160)assert(reader.diagnostic.find("render=960x540 output=3840x2160")!=std::string::npos);
+  assert(reader.beginPicking(output.x,output.y,1));
+  GameGridReaderTestAccess::finishCollection(reader);
+  assert(reader.pollPicking()==GameGridState::Unavailable&&reader.pickerOptions().empty());
+  assert(reader.beginPicking(output.x,output.y,1));
+  next=camera->frame()+1;std::memcpy(camera->f.data()+225,&next,4);camera->f[211]+=.016f;
+  GameGridReaderTestAccess::finishCollection(reader);
+  assert(reader.pollPicking()==GameGridState::Ready);
+  options=reader.pickerOptions();assert(options.size()==1&&options[0].directionCategory==3);
+  assert(cameraOptionGrid(options[0],output.x,output.y,1,0).usable());
+  reader.cancelPicking();
+  }
+  // A complete fresh copy captured before overlay work survives later source
+  // overwrite. It is request-local, bounded in age, and still checks the level.
+  *camera=gameCameraFixture();GameGridReaderTestAccess::fixture(reader,&managerSlot,verified,camera.get());
+  assert(reader.begin(3840,2160,true,1));
+  next=camera->frame()+1;std::memcpy(camera->f.data()+225,&next,4);camera->f[211]+=.016f;
+  reader.captureBeforeOverlay(3840,2160);camera->f[178]=NAN;
+  assert(reader.poll(preview)==GameGridState::Ready&&preview.usable());
+  assert(reader.diagnostic.find("source_type=8 source=main capture=poll")!=std::string::npos);
+  *camera=gameCameraFixture();GameGridReaderTestAccess::fixture(reader,&managerSlot,verified,camera.get());assert(reader.begin(3840,2160,true,1));
+  next=camera->frame()+1;std::memcpy(camera->f.data()+225,&next,4);camera->f[211]+=.016f;
+  reader.captureBeforeOverlay(3840,2160);GameGridReaderTestAccess::expireCapture(reader);
+  assert(reader.poll(preview)==GameGridState::Waiting);
+  assert(reader.poll(preview)==GameGridState::Waiting); // A static copy cannot renew an expired capture.
+  reader.captureBeforeOverlay(3840,2160);put(settings,256,uint32_t(8));
+  assert(reader.poll(preview)==GameGridState::Unavailable&&reader.error==ErrorId::LevelChanged);put(settings,256,uint32_t(7));
+  // Reacquire an equal, validated projection at a new temporary address and
+  // different internal extent. Initial/static copies cannot produce freshness.
+  *camera=gameCameraFixture();*duplicate=*camera;GameGridReaderTestAccess::fixture(reader,&managerSlot,verified,camera.get());
+  assert(reader.begin(3840,2160,true,1));camera->f[178]=NAN;
+  GameGridReaderTestAccess::scanFixture(reader,duplicate.get());assert(reader.poll(preview)==GameGridState::Waiting);
+  next=duplicate->frame()+1;std::memcpy(duplicate->f.data()+225,&next,4);duplicate->f[211]+=.016f;
+  duplicate->f[216]*=2;duplicate->f[217]*=2;
+  GameGridReaderTestAccess::scanFixture(reader,duplicate.get());duplicate->f[178]=NAN;
+  assert(reader.poll(preview)==GameGridState::Ready&&reader.diagnostic.find("capture=scan")!=std::string::npos);
+  *camera=gameCameraFixture();*duplicate=*camera;GameGridReaderTestAccess::fixture(reader,&managerSlot,verified,camera.get());assert(reader.begin(3840,2160,true,1));
+  camera->f[178]=NAN;next=duplicate->frame()+1;std::memcpy(duplicate->f.data()+225,&next,4);duplicate->f[211]+=.016f;
+  GameGridReaderTestAccess::scanFixture(reader,duplicate.get());duplicate->f[178]=NAN;
+  assert(reader.poll(preview)==GameGridState::Ready&&GameGridReaderTestAccess::movedCount(reader)==1);
+  *camera=gameCameraFixture();*duplicate=*camera;
+  next=duplicate->frame()+1;std::memcpy(duplicate->f.data()+225,&next,4);duplicate->f[211]+=.016f;
+  GameGridReaderTestAccess::fixture(reader,&managerSlot,verified,camera.get());GameGridReaderTestAccess::append(reader,duplicate.get());assert(reader.begin(3840,2160,true,1));
+  assert(reader.poll(preview)==GameGridState::Waiting); // Both copies predate this request's first new frame.
+  auto oldCopy=std::make_unique<CameraFrame>(*duplicate);GameGridReaderTestAccess::scanFixture(reader,oldCopy.get());
+  assert(reader.poll(preview)==GameGridState::Waiting); // A moved old duplicate is still not a new frame.
+  // The captured picker preview also survives an overwritten source, with no
+  // adoption re-read path. Known auxiliary views remain explicitly manual.
+  *camera=gameCameraFixture();uint32_t auxiliary=5;std::memcpy(camera->f.data()+226,&auxiliary,4);
+  GameGridReaderTestAccess::fixture(reader,&managerSlot,verified,camera.get());assert(reader.begin(3840,2160,true,1));
+  next=camera->frame()+1;std::memcpy(camera->f.data()+225,&next,4);camera->f[211]+=.016f;
+  GameGridReaderTestAccess::timeout(reader);assert(reader.poll(preview)==GameGridState::Unavailable&&reader.error==ErrorId::AuxiliaryCameraOnly);
+  assert(reader.beginPicking(3840,2160,1));
+  next=camera->frame()+1;std::memcpy(camera->f.data()+225,&next,4);camera->f[211]+=.016f;
+  reader.captureBeforeOverlay(3840,2160);camera->f[178]=NAN;GameGridReaderTestAccess::finishCollection(reader);
+  assert(reader.pollPicking()==GameGridState::Ready&&reader.pickerOptions().size()==1);
+  assert(reader.pickerOptions()[0].camera.sourceType()==5&&cameraOptionGrid(reader.pickerOptions()[0],3840,2160,1,0).usable());
+  for(Point internal:std::vector<Point>{{480,270},{640,360},{320,180}}){
+   *camera=quarterCameraFixture();std::memcpy(camera->f.data()+226,&auxiliary,4);camera->f[216]=1/internal.x;camera->f[217]=1/internal.y;
+   GameGridReaderTestAccess::fixture(reader,&managerSlot,verified,camera.get());assert(reader.begin(3840,2160,true,1));
+   next=camera->frame()+1;std::memcpy(camera->f.data()+225,&next,4);camera->f[211]+=.016f;
+   GameGridReaderTestAccess::timeout(reader);assert(reader.poll(preview)==GameGridState::Unavailable&&reader.error==ErrorId::AuxiliaryCameraOnly);
+   assert(reader.beginPicking(3840,2160,1));next=camera->frame()+1;std::memcpy(camera->f.data()+225,&next,4);camera->f[211]+=.016f;
+   GameGridReaderTestAccess::finishCollection(reader);assert(reader.pollPicking()==GameGridState::Ready&&reader.pickerOptions().size()==1);
+  }
+  // A list full of auxiliary views cannot crowd out a later normal main view.
+  reader.cancelPicking();auto option=std::make_unique<CameraFrame>(gameCameraFixture());
+  for(size_t i=0;i<GameGridReader::PickMaxOptions;++i){uint32_t source=5;std::memcpy(option->f.data()+226,&source,4);option->f[208]=float(i);GameGridReaderTestAccess::offer(reader,0x100000+i,*option);}
+  *option=gameCameraFixture();GameGridReaderTestAccess::offer(reader,0x200000,*option);
+  options=reader.pickerOptions();assert(options.size()==GameGridReader::PickMaxOptions&&options[0].camera.sourceType()==8);
+  std::set<uint64_t> tokens;for(const auto&o:options)assert(tokens.insert(o.token).second);
+  // A new request cannot reuse a fresh snapshot or its cross-address history.
+  *camera=gameCameraFixture();GameGridReaderTestAccess::fixture(reader,&managerSlot,verified,camera.get());assert(reader.begin(3840,2160,true,1));
+  assert(GameGridReaderTestAccess::historySize(reader)==1&&reader.poll(preview)==GameGridState::Waiting);
+  GameGridReaderTestAccess::pressure(reader,*camera);
  }
 }
 int main(){
@@ -89,6 +197,10 @@ int main(){
  }
  // A viewport-looking block still needs all the actual camera checks.
  auto broken=camera;broken.f[0]=NAN;std::memcpy(memory+3*Page,broken.f.data(),960);
+ auto quarter=camera;quarter.f[216]*=4;quarter.f[217]*=4;
+ std::memcpy(memory+4*Page+64,quarter.f.data(),960);expected.insert(reinterpret_cast<uintptr_t>(memory+4*Page+64));
+ auto directionOnly=quarterCameraFixture();std::memcpy(memory+6*Page+64,directionOnly.f.data(),960);
+ std::set<uintptr_t> directionFound;
  DWORD old=0;assert(VirtualProtect(memory,Page,PAGE_READWRITE|PAGE_GUARD,&old));
  assert(VirtualProtect(memory+32*Page,Page,PAGE_READONLY,&old));
  // The old whole-stack read fails as soon as a single page is inaccessible.
@@ -99,9 +211,11 @@ int main(){
  auto visit=[&](uintptr_t address,const unsigned char* bytes){
   ++visits;CameraFrame frame;std::memcpy(frame.f.data(),bytes,960);
   if(validCamera(frame,3840,2160))assert(found.insert(address).second);
+  if(validateCamera(frame,3840,2160)==CameraValidation::OrientationInvalid)assert(directionFound.insert(address).second);
  };
  scanCameraStack(reinterpret_cast<uintptr_t>(memory),reinterpret_cast<uintptr_t>(memory)+Reserve,visit,stats);
  assert(found==expected&&visits>0&&stats.unreadableRegions>=2&&stats.readFailures==0);
+ assert(directionFound==std::set<uintptr_t>{reinterpret_cast<uintptr_t>(memory+6*Page+64)});
  assert(stats.bytes==37*Page);
  MEMORY_BASIC_INFORMATION guard{};assert(VirtualQuery(memory,&guard,sizeof(guard)));
  assert(guard.Protect&PAGE_GUARD); // Scanning must not grow or disturb the game stack.

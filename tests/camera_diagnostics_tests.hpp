@@ -6,6 +6,16 @@
 namespace sketch {
 inline void checkCameraDiagnostics(){
  auto good=gameCameraFixture();assert(inspectCamera(good,3840,2160).reason==CameraReject::None);
+ assert(good.sourceType()==8&&std::string(cameraSourceName(8))=="main"&&std::string(cameraSourceName(5))=="reflection");
+ assert(auxiliaryCamera(5)&&auxiliaryCamera(1)&&!auxiliaryCamera(0)&&!auxiliaryCamera(8)&&!auxiliaryCamera(99));
+ auto auxiliary=good;uint32_t type=5;std::memcpy(auxiliary.f.data()+226,&type,4);
+ CameraDiagnostics source;source.record(CameraStage::Scan,{CameraValidation::OrientationInvalid,CameraReject::Orientation},&auxiliary);
+ assert(source.lines().back().find("source_type=5 source=reflection")!=std::string::npos);
+ auto unknown=good;type=99;std::memcpy(unknown.f.data()+226,&type,4);
+ assert(validCamera(unknown,3840,2160)); // Purpose is never a numeric/matrix bypass.
+ assert(cameraViewPreferred(good,CameraValidation::Valid,unknown,CameraValidation::Valid));
+ assert(!cameraViewPreferred(auxiliary,CameraValidation::Valid,good,CameraValidation::Valid));
+ assert(cameraViewPreferred(unknown,CameraValidation::Valid,good,CameraValidation::OrientationInvalid));
  // vp_auto_tbn at byte 860 is an int32, including bit patterns that resemble float NaNs.
  for(uint32_t bits:{0xffffffffu,0x7fc00000u,0x7f800000u}){
   auto typed=good;std::memcpy(typed.f.data()+215,&bits,4);assert(inspectCamera(typed,3840,2160).reason==CameraReject::None);

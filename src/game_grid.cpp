@@ -51,7 +51,7 @@ bool GameGridReader::readLevel(){
  if(!heightOverride&&actors.empty())return fail(ErrorId::ActorLayerUnavailable);return true;
 }
 void GameGridReader::scan(){
- auto previous=picking?std::move(candidates):std::vector<Candidate>{};
+ auto previous=std::move(candidates);
  candidates.clear();lastScan=GetTickCount64();++scanStats.scans;cameraDiagnostics.beginScan();
  struct ThreadBasic{LONG status;void*teb;ULONG_PTR clientProcess,clientThread,affinity;LONG priority,basePriority;};
  using QueryThread=LONG(NTAPI*)(HANDLE,ULONG,void*,ULONG,ULONG*);auto query=reinterpret_cast<QueryThread>(GetProcAddress(GetModuleHandleW(L"ntdll.dll"),"NtQueryInformationThread"));if(!query){++scanStats.queryApiFailures;scanStats.systemError=scanStats.queryApiError=GetLastError();candidates=std::move(previous);return;}
@@ -61,27 +61,100 @@ void GameGridReader::scan(){
   ++scanStats.threads;HANDLE handle=OpenThread(THREAD_QUERY_INFORMATION,FALSE,thread.th32ThreadID);if(!handle){++scanStats.openThreadFailures;scanStats.systemError=scanStats.openThreadError=GetLastError();continue;}ThreadBasic info{};LONG status=query(handle,0,&info,sizeof(info),nullptr);CloseHandle(handle);if(status<0){++scanStats.queryThreadFailures;scanStats.threadQueryStatus=status;scanStats.systemError=DWORD(status);continue;}
   uintptr_t tib[3]{};if(!read(reinterpret_cast<uintptr_t>(info.teb),tib,sizeof(tib))){++scanStats.tibReadFailures;scanStats.systemError=scanStats.tibReadError=GetLastError();continue;}uintptr_t low=tib[2],high=tib[1];if(high<=low||low<0x10000){++scanStats.badStackRanges;continue;}
   ++scanStats.stackRanges;
-  scanCameraStack(low,high,[&](uintptr_t address,const unsigned char* data){float viewport[2];std::memcpy(viewport,data+864,8);
-   bool matches=cameraViewportMatches(viewport[0],viewport[1],width,height);
+  scanCameraStack(low,high,[&](uintptr_t address,const unsigned char* data){float viewport[2];std::memcpy(viewport,data+864,8);uint32_t sourceType=0;std::memcpy(&sourceType,data+904,4);
+   bool matches=cameraViewportMatches(viewport[0],viewport[1],width,height,sourceType==5);
    if(!matches&&!CameraDiagnostics::plausibleViewport(viewport[0],viewport[1]))return;
    // Candidate storage lives on the heap so scanning cannot discover our own local copies.
    auto frame=std::make_unique<CameraFrame>();std::memcpy(frame->f.data(),data,960);
    if(!matches){cameraDiagnostics.probeViewport(*frame);return;} // Diagnostics only; never add a mismatched frame.
    ++scanStats.viewportMatches;
    auto check=inspectCamera(*frame,width,height);cameraDiagnostics.record(CameraStage::Scan,check,frame.get());
-   if(check.result==CameraValidation::Valid){++scanStats.valid;if(!picking||candidates.size()<PickMaxCandidates)candidates.push_back({address,frame->frame(),frame->f[211]});}
-   else if(check.result==CameraValidation::OrientationInvalid){++scanStats.orientation;rejectedCameraOrientation=true;if(!picking||candidates.size()<PickMaxCandidates)candidates.push_back({address,frame->frame(),frame->f[211]});}
+   if(check.result==CameraValidation::Valid){++scanStats.valid;rememberCandidate({address,frame->frame(),frame->f[211],frame->sourceType()});observeCamera(address,*frame,CameraStage::Scan);}
+   else if(check.result==CameraValidation::OrientationInvalid){++scanStats.orientation;rejectedCameraOrientation=true;rememberCandidate({address,frame->frame(),frame->f[211],frame->sourceType()});observeCamera(address,*frame,CameraStage::Scan);}
    else ++scanStats.invalid;
   },scanStats);
  }while(Thread32Next(snapshot,&thread));}
  DWORD enumerationError=GetLastError();if(enumerationError!=ERROR_NO_MORE_FILES){++scanStats.enumerationFailures;scanStats.enumerationError=enumerationError;}CloseHandle(snapshot);
- for(auto old:previous){auto it=std::find_if(candidates.begin(),candidates.end(),[&](auto now){return now.address==old.address;});if(it!=candidates.end())*it=old;else if(candidates.size()<PickMaxCandidates)candidates.push_back(old);}
+ for(auto old:previous)if(std::none_of(candidates.begin(),candidates.end(),[&](auto now){return now.address==old.address;}))rememberCandidate(old);
+}
+void GameGridReader::rememberCandidate(Candidate candidate){
+ auto existing=std::find_if(candidates.begin(),candidates.end(),[&](auto c){return c.address==candidate.address;});
+ if(existing!=candidates.end()){*existing=candidate;return;}
+ if(candidates.size()<PickMaxCandidates){candidates.push_back(candidate);return;}
+ auto worst=std::min_element(candidates.begin(),candidates.end(),[](auto a,auto b){return cameraSourceRank(a.sourceType)<cameraSourceRank(b.sourceType);});
+ if(cameraSourceRank(candidate.sourceType)>cameraSourceRank(worst->sourceType))*worst=candidate;
+}
+void GameGridReader::observeCamera(uintptr_t address,const CameraFrame& frame,CameraStage stage){
+ // Compare only with observations made earlier in this request. Two old copies
+ // discovered in the same scan are not evidence of a newly rendered frame.
+ auto exact=std::find_if(observations.begin(),observations.end(),[&](const auto& old){return old.address==address;});
+ // Freeze the preceding round while this round updates its addresses. Compare
+ // against the newest matching baseline, so an old duplicate cannot masquerade
+ // as new merely because another address held an even older copy.
+ auto prior=[&](const Observation& old){return old.round<observationRound?old.frame.get():old.previous.get();};
+ const CameraFrame* baseline=nullptr;uintptr_t baselineAddress=0;
+ if(exact!=observations.end()){auto old=prior(*exact);if(old&&old->sourceType()==frame.sourceType()){baseline=old;baselineAddress=address;}}
+ for(const auto& old:observations){auto view=prior(old);
+  if(view&&sameCameraView(*view,frame,false)&&(!baseline||int32_t(view->frame()-baseline->frame())>0)){baseline=view;baselineAddress=old.address;}
+ }
+ if(baseline){
+  uint32_t advance=frame.frame()-baseline->frame();float seconds=frame.f[211]-baseline->f[211];
+  auto fresh=cameraFreshness(advance,seconds);cameraDiagnostics.record(CameraStage::Fresh,{fresh==CameraReject::None?CameraValidation::Valid:CameraValidation::Invalid,fresh},&frame,advance,seconds);
+  if(fresh==CameraReject::None){
+   if(stage==CameraStage::Scan)++scanFresh;else ++pollFresh;
+   if(baselineAddress!=address)++movedFresh;
+   if(auxiliaryCamera(frame.sourceType())){auxiliarySeen=true;++auxiliaryFresh;}
+   if(picking)offerChoice(address,frame);
+   else if(!auxiliaryCamera(frame.sourceType())){
+    auto kind=validateCamera(frame,width,height);
+    if(!capturedCamera||cameraViewPreferred(frame,kind,*capturedCamera,capturedKind)){
+     if(!capturedCamera)capturedCamera=std::make_unique<CameraFrame>();
+     *capturedCamera=frame;capturedKind=kind;capturedAt=GetTickCount64();capturedStage=stage;
+    }
+   }
+  }
+ }
+ // Keep baselines on the heap; never leave full camera copies on scanned stacks.
+ if(exact==observations.end()){
+  Observation item;item.address=address;item.round=observationRound;item.frame=std::make_unique<CameraFrame>(frame);
+  if(observations.size()<MaxObservations)observations.push_back(std::move(item));
+  else {
+   int lowest=2;for(const auto& old:observations)lowest=std::min(lowest,cameraSourceRank(old.frame->sourceType()));
+   if(cameraSourceRank(frame.sourceType())>=lowest){
+    for(size_t n=0;n<MaxObservations;++n){size_t slot=observationCursor++%MaxObservations;
+     if(cameraSourceRank(observations[slot].frame->sourceType())==lowest){observations[slot]=std::move(item);break;}}
+   }
+  }
+ }else {
+  if(exact->round<observationRound){if(!exact->previous)exact->previous=std::make_unique<CameraFrame>();*exact->previous=*exact->frame;}
+  *exact->frame=frame;exact->round=observationRound;
+ }
+}
+void GameGridReader::captureCameras(bool early){
+ capturedCamera.reset();capturedKind=CameraValidation::Invalid;capturePrepared=true;++observationRound;
+ if(early)++earlyCaptures;
+ for(auto c:candidates){auto frame=std::make_unique<CameraFrame>();
+  if(!read(c.address,frame->f.data(),960)){cameraDiagnostics.record(CameraStage::Poll,{CameraValidation::Invalid,CameraReject::ReadFailure},nullptr,0,0,GetLastError());continue;}
+  if(acceptsCamera(*frame,CameraStage::Poll))observeCamera(c.address,*frame,CameraStage::Poll);
+ }
+ // Re-scan even when only a reflection is fresh. Retain validated scan-time
+ // copies immediately, before later overlay calls can overwrite their sources.
+ if(GetTickCount64()-lastScan>=250)scan();
+}
+void GameGridReader::captureBeforeOverlay(float w,float h){
+ if(w==width&&h==height&&levelValidated)captureCameras(true);
+}
+bool GameGridReader::localizationContext(){
+ uintptr_t active=0;LevelIdentity current;
+ if(!get(image+0xb69600,active)||active!=manager||!readValidatedLevel(read,image,current)||current!=pickerLevel)return fail(ErrorId::LevelChanged);
+ return true;
 }
 std::vector<std::string> GameGridReader::failureDetails()const{
  if(error==ErrorId::None)return {};
  std::vector<std::string> lines;char context[480];
  std::snprintf(context,sizeof(context),"context output=%.0fx%.0f elapsed_ms=%llu verified_build=%d level_validated=%d logical=%dx%d actors=%zu height_override=%d requested_z=%.6g selected_z=%.6g remaining_candidates=%zu",width,height,static_cast<unsigned long long>(GetTickCount64()-started),supported?1:0,levelValidated?1:0,levelValidated?columns:0,levelValidated?rows:0,levelValidated?actors.size():0,heightOverride?1:0,forcedZ,planeSelected?planeZ:NAN,candidates.size());lines.emplace_back(context);
  lines.push_back("scan"+scanDiagnostic());
+ lines.push_back("capture rounds="+std::to_string(observationRound)+" early="+std::to_string(earlyCaptures)+" history="+std::to_string(observations.size())+" scan_fresh="+std::to_string(scanFresh)+" poll_fresh="+std::to_string(pollFresh)+" moved_fresh="+std::to_string(movedFresh)+" auxiliary_fresh="+std::to_string(auxiliaryFresh));
  char memory[1000];std::snprintf(memory,sizeof(memory),"scan_access query_api_failures=%zu query_api_error=0x%lx snapshot_failures=%zu snapshot_error=0x%lx enumeration_failures=%zu enumeration_error=0x%lx open_thread_failures=%zu open_thread_error=0x%lx query_thread_failures=%zu query_ntstatus=0x%lx tib_read_failures=%zu tib_read_error=0x%lx bad_stack_ranges=%zu virtual_query_failures=%zu virtual_query_error=0x%lx guard_regions=%zu uncommitted_regions=%zu retry_recovered=%zu retry_failures=%zu read_error=0x%lx",scanStats.queryApiFailures,scanStats.queryApiError,scanStats.snapshotFailures,scanStats.snapshotError,scanStats.enumerationFailures,scanStats.enumerationError,scanStats.openThreadFailures,scanStats.openThreadError,scanStats.queryThreadFailures,static_cast<unsigned long>(scanStats.threadQueryStatus),scanStats.tibReadFailures,scanStats.tibReadError,scanStats.badStackRanges,scanStats.virtualQueryFailures,scanStats.virtualQueryError,scanStats.guardRegions,scanStats.uncommittedRegions,scanStats.retryRecovered,scanStats.retryFailures,scanStats.readError);lines.emplace_back(memory);
  auto camera=cameraDiagnostics.lines();lines.insert(lines.end(),camera.begin(),camera.end());return lines;
 }
@@ -97,23 +170,26 @@ bool GameGridReader::readCurrentLevel(LevelIdentity& identity){
 }
 bool GameGridReader::begin(float w,float h,bool overrideHeight,float z){
  cancelPicking();
+ observations.clear();capturedCamera.reset();capturedKind=CameraValidation::Invalid;capturePrepared=auxiliarySeen=false;
+ observationRound=capturedAt=0;observationCursor=choiceSerial=earlyCaptures=scanFresh=pollFresh=movedFresh=auxiliaryFresh=0;
  error=ErrorId::None;diagnostic.clear();directionCategory=0;rejectedCameraOrientation=false;scanStats={};cameraDiagnostics={};levelValidated=false;planeSelected=false;++requestSerial;
- width=w;height=h;heightOverride=overrideHeight;forcedZ=z;started=GetTickCount64();
- verifyBuild();if(!readLevel())return false;levelValidated=true;
- std::vector<Candidate> live;for(auto c:candidates){auto frame=std::make_unique<CameraFrame>();if(!read(c.address,frame->f.data(),960)){cameraDiagnostics.record(CameraStage::Cache,{CameraValidation::Invalid,CameraReject::ReadFailure},nullptr,0,0,GetLastError());continue;}if(acceptsCamera(*frame,CameraStage::Cache))live.push_back({c.address,frame->frame(),frame->f[211]});}
- candidates=std::move(live);if(candidates.empty())scan();diagnostic="waiting_for_fresh_camera_frame";return true;
+ width=w;height=h;heightOverride=overrideHeight;forcedZ=z;started=GetTickCount64();lastScan=started;
+ verifyBuild();if(!readLevel())return false;
+ if(!readValidatedLevel(read,image,pickerLevel))return fail(ErrorId::LevelChanged);levelValidated=true;
+ std::vector<Candidate> live;for(auto c:candidates){auto frame=std::make_unique<CameraFrame>();if(!read(c.address,frame->f.data(),960)){cameraDiagnostics.record(CameraStage::Cache,{CameraValidation::Invalid,CameraReject::ReadFailure},nullptr,0,0,GetLastError());continue;}if(acceptsCamera(*frame,CameraStage::Cache))live.push_back({c.address,frame->frame(),frame->f[211],frame->sourceType()});}
+ candidates=std::move(live);
+ for(auto c:candidates){auto frame=std::make_unique<CameraFrame>();if(read(c.address,frame->f.data(),960)&&acceptsCamera(*frame,CameraStage::Cache))observeCamera(c.address,*frame,CameraStage::Cache);}
+ // Initial scan cannot produce a fresh result: all baselines share round zero.
+ if(candidates.empty())scan();diagnostic="waiting_for_fresh_camera_frame";return true;
 }
 GameGridState GameGridReader::poll(Grid& grid){
- auto now=GetTickCount64();auto best=std::make_unique<CameraFrame>();CameraValidation bestKind=CameraValidation::Invalid;
- for(auto c:candidates){auto frame=std::make_unique<CameraFrame>();if(!read(c.address,frame->f.data(),960)){cameraDiagnostics.record(CameraStage::Poll,{CameraValidation::Invalid,CameraReject::ReadFailure},nullptr,0,0,GetLastError());continue;}if(!acceptsCamera(*frame,CameraStage::Poll))continue;
-  uint32_t advance=frame->frame()-c.frame;float seconds=frame->f[211]-c.time;
-  auto fresh=cameraFreshness(advance,seconds);cameraDiagnostics.record(CameraStage::Fresh,{fresh==CameraReject::None?CameraValidation::Valid:CameraValidation::Invalid,fresh},frame.get(),advance,seconds);
-  if(fresh!=CameraReject::None)continue;auto kind=validateCamera(*frame,width,height);
-  if(cameraCandidatePreferred(kind,frame->frame(),bestKind,best->frame())){*best=*frame;bestKind=kind;}
- }
+ if(!localizationContext())return GameGridState::Unavailable;
+ if(!capturePrepared)captureCameras(false);capturePrepared=false;
+ auto now=GetTickCount64();auto best=std::move(capturedCamera);auto bestKind=capturedKind;
+ if(!best||now-capturedAt>CaptureLifetimeMs)bestKind=CameraValidation::Invalid;
  if(bestKind==CameraValidation::Invalid){
-  if(now-started>1800){fail(rejectedCameraOrientation?ErrorId::CameraOrientationInvalid:(candidates.empty()?ErrorId::CameraNotFound:ErrorId::FreshCameraFrameUnavailable));return GameGridState::Unavailable;}
-  if(now-lastScan>=250)scan();return GameGridState::Waiting;
+  if(now-started>1800){fail(auxiliarySeen?ErrorId::AuxiliaryCameraOnly:rejectedCameraOrientation?ErrorId::CameraOrientationInvalid:(candidates.empty()?ErrorId::CameraNotFound:ErrorId::FreshCameraFrameUnavailable));return GameGridState::Unavailable;}
+  return GameGridState::Waiting;
  }
  planeZ=forcedZ;if(!heightOverride){double nearest=1e100;const auto&m=best->f;
   for(auto p:actors){double d=m[12]*p[0]+m[13]*p[1]+m[14]*p[2]+m[15];if(d<=.1)continue;
@@ -126,7 +202,7 @@ GameGridState GameGridReader::poll(Grid& grid){
  uintptr_t activeManager=0;if(!get(image+0xb69600,activeManager)||activeManager!=manager){fail(ErrorId::LevelChanged);return GameGridState::Unavailable;}
  grid=gridFromCamera(*best,width,height,planeZ,true);if(!grid.usable()){fail(ErrorId::ProjectedGridInvalid);return GameGridState::Unavailable;}
  directionCategory=cameraOrientation(*best).category;
- char message[400];std::snprintf(message,sizeof(message),"game_data layout=r67271 verified_build=%d frame=%u logical=%dx%d z=%.3f render=%.0fx%.0f output=%.0fx%.0f candidates=%zu manager=0x%llx direction_category=%u manual_direction=%d",supported?1:0,best->frame(),columns,rows,planeZ,1.f/best->f[216],1.f/best->f[217],width,height,candidates.size(),static_cast<unsigned long long>(manager),unsigned(directionCategory),directionCategory?1:0);diagnostic=message;return GameGridState::Ready;
+ char message[560];std::snprintf(message,sizeof(message),"game_data layout=r67271 verified_build=%d frame=%u logical=%dx%d z=%.3f render=%.0fx%.0f output=%.0fx%.0f candidates=%zu manager=0x%llx direction_category=%u manual_direction=%d source_type=%u source=%s capture=%s capture_age_ms=%llu",supported?1:0,best->frame(),columns,rows,planeZ,1.f/best->f[216],1.f/best->f[217],width,height,candidates.size(),static_cast<unsigned long long>(manager),unsigned(directionCategory),directionCategory?1:0,best->sourceType(),cameraSourceName(best->sourceType()),CameraStageNames[size_t(capturedStage)],static_cast<unsigned long long>(now-capturedAt));diagnostic=message;return GameGridState::Ready;
 }
 float GameGridReader::suggestedPlane(const CameraFrame& frame,bool& actorLayer)const{
  actorLayer=false;float z=forcedZ;double nearest=1e100;const auto& m=frame.f;
@@ -152,15 +228,20 @@ bool GameGridReader::beginPicking(float w,float h,float fallbackZ){
  picking=true;if(candidates.size()>PickMaxCandidates)candidates.resize(PickMaxCandidates);return true;
 }
 void GameGridReader::offerChoice(uintptr_t address,const CameraFrame& frame){
- auto it=std::find_if(choices.begin(),choices.end(),[&](const auto& item){return sameCameraView(item.option.camera,frame);});
+ auto it=std::find_if(choices.begin(),choices.end(),[&](const auto& item){return sameCameraView(item.option.camera,frame,false);});
  if(it==choices.end()){
-  if(choices.size()>=PickMaxOptions)return;
+  if(choices.size()>=PickMaxOptions){
+   auto priority=[](const CameraFrame& c){return cameraSourceRank(c.sourceType())*2+(cameraOrientation(c).category==0?1:0);};
+   auto worst=std::min_element(choices.begin(),choices.end(),[&](const auto& a,const auto& b){return priority(a.option.camera)<priority(b.option.camera);});
+   if(priority(frame)<=priority(worst->option.camera))return;
+   choices.erase(worst);
+  }
   // Emplace directly on the heap: no camera-sized temporary on a scanned stack.
-  choices.emplace_back();it=choices.end()-1;it->option.token=(requestSerial<<32)|choices.size();it->option.camera=frame;
+  choices.emplace_back();it=choices.end()-1;it->option.token=(requestSerial<<32)|++choiceSerial;it->option.camera=frame;
   it->option.directionCategory=cameraOrientation(frame).category;it->option.suggestedZ=suggestedPlane(frame,it->option.actorLayer);
  }
  auto source=std::find_if(it->sources.begin(),it->sources.end(),[&](auto c){return c.address==address;});
- Candidate value{address,frame.frame(),frame.f[211]};
+ Candidate value{address,frame.frame(),frame.f[211],frame.sourceType()};
  if(source!=it->sources.end())*source=value;else if(it->sources.size()<PickMaxSources)it->sources.push_back(value);
  it->option.copies=it->sources.size();
  if(int32_t(frame.frame()-it->option.camera.frame())>0)it->option.camera=frame;
@@ -168,20 +249,20 @@ void GameGridReader::offerChoice(uintptr_t address,const CameraFrame& frame){
 GameGridState GameGridReader::pollPicking(){
  if(!picking){fail(ErrorId::CameraChoiceExpired);return GameGridState::Unavailable;}
  if(!pickerContext(width,height))return GameGridState::Unavailable;
+ if(!capturePrepared)captureCameras(false);capturePrepared=false;
  auto now=GetTickCount64();
- for(auto c:candidates){auto frame=std::make_unique<CameraFrame>();
-  if(!read(c.address,frame->f.data(),960)){cameraDiagnostics.record(CameraStage::Poll,{CameraValidation::Invalid,CameraReject::ReadFailure},nullptr,0,0,GetLastError());continue;}
-  if(!acceptsCamera(*frame,CameraStage::Poll))continue;
-  auto fresh=cameraFreshness(frame->frame()-c.frame,frame->f[211]-c.time);cameraDiagnostics.record(CameraStage::Fresh,{fresh==CameraReject::None?CameraValidation::Valid:CameraValidation::Invalid,fresh},frame.get(),frame->frame()-c.frame,frame->f[211]-c.time);
-  if(fresh==CameraReject::None)offerChoice(c.address,*frame);
- }
  if(now-started>=PickCollectMs){
   if(!choices.empty())return GameGridState::Ready;
   fail(rejectedCameraOrientation?ErrorId::CameraOrientationInvalid:(candidates.empty()?ErrorId::CameraNotFound:ErrorId::FreshCameraFrameUnavailable));return GameGridState::Unavailable;
  }
- if(now-lastScan>=250)scan();return GameGridState::Waiting;
+ return GameGridState::Waiting;
 }
 std::vector<CameraOption> GameGridReader::pickerOptions()const{
- std::vector<CameraOption> result;result.reserve(choices.size());for(const auto& c:choices)result.push_back(c.option);return result;
+ std::vector<CameraOption> result;result.reserve(choices.size());for(const auto& c:choices)result.push_back(c.option);
+ std::stable_sort(result.begin(),result.end(),[](const auto& a,const auto& b){
+  auto ar=cameraSourceRank(a.camera.sourceType()),br=cameraSourceRank(b.camera.sourceType());
+  if(ar!=br)return ar>br;
+  return (a.directionCategory==0)>(b.directionCategory==0);
+ });return result;
 }
 }

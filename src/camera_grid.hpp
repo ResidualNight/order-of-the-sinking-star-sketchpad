@@ -6,7 +6,13 @@ namespace sketch {
 struct CameraFrame {
  std::array<float,240> f{};
  uint32_t frame() const {uint32_t n;std::memcpy(&n,f.data()+225,4);return n;}
+ uint32_t sourceType() const {uint32_t n;std::memcpy(&n,f.data()+226,4);return n;}
 };
+// r67271 View_Kind values, corroborated by controlled main/reflection captures.
+// Unknown/new values retain validation; this hint never admits invalid data.
+inline bool auxiliaryCamera(uint32_t type){return (type>=1&&type<=7)||type==9||type==10;}
+inline const char* cameraSourceName(uint32_t type){return type==8?"main":type==5?"reflection":auxiliaryCamera(type)?"auxiliary":"unknown";}
+inline int cameraSourceRank(uint32_t type){return type==8?2:auxiliaryCamera(type)?0:1;}
 enum class CameraValidation {Invalid,Valid,OrientationInvalid};
 enum class CameraReject {
  None,TransformValues,CameraValues,Viewport,DirectionNorm,FrameIndex,CameraTime,MapAmount,
@@ -19,17 +25,28 @@ struct CameraCheck {
  int badIndex=-1;float badValue=0;
 };
 // r67271 has native/half-display modes plus fixed 720p/1080p/1440p/4K modes.
+// Affected-machine diagnostics also show consistent quarter-output views
+// (960x540 at 3840x2160). Admit that exact size relation through the same
+// numeric, inverse, orientation and freshness checks as every other view.
 // Internal rendering can be smaller OR larger than the output. The projection
 // is already in NDC; only gridFromCamera maps it onto the complete swapchain.
 // Keep the known mode sizes and aspect check instead of accepting arbitrary data.
-inline bool cameraViewportMatches(float inverseWidth,float inverseHeight,float w,float h){
+inline bool cameraViewportMatches(float inverseWidth,float inverseHeight,float w,float h,bool reflection=false){
  if(!std::isfinite(w)||!std::isfinite(h)||w<640||h<360||w>16384||h>16384||
     !std::isfinite(inverseWidth)||!std::isfinite(inverseHeight)||inverseWidth<=0||inverseHeight<=0)return false;
  float cw=1/inverseWidth,ch=1/inverseHeight;
  if(!std::isfinite(cw)||!std::isfinite(ch)||cw<160||ch<90||cw>16385||ch>16385)return false;
- for(float scale:{1.f,.5f})if(std::abs(cw-w*scale)<=1&&std::abs(ch-h*scale)<=1)return true;
+ for(float scale:{1.f,.5f,.25f})if(std::abs(cw-w*scale)<=1&&std::abs(ch-h*scale)<=1)return true;
  for(float renderHeight:{720.f,1080.f,1440.f,2160.f})
   if(std::abs(ch-renderHeight)<=1&&std::abs(cw-renderHeight*w/h)<=1)return true;
+ // Controlled r67271 captures: reflection size is 1/2 or 1/4 of a
+ // supported scene viewport. Only source type 5 may use this extra relation;
+ // the reader never automatically adopts known auxiliary views.
+ if(reflection)for(float scale:{.5f,.25f}){
+  for(float parent:{1.f,.5f})if(std::abs(cw-w*parent*scale)<=1&&std::abs(ch-h*parent*scale)<=1)return true;
+  for(float parentHeight:{720.f,1080.f,1440.f,2160.f})
+   if(std::abs(ch-parentHeight*scale)<=1&&std::abs(cw-parentHeight*w/h*scale)<=1)return true;
+ }
  return false;
 }
 inline float matrixInverseError(const float*a,const float*b){float error=0;for(int row=0;row<4;row++)for(int col=0;col<4;col++){float value=0;for(int k=0;k<4;k++)value+=a[row*4+k]*b[k*4+col];if(!std::isfinite(value))return INFINITY;error=std::max(error,std::abs(value-(row==col?1.f:0.f)));}return error;}
@@ -50,11 +67,18 @@ inline bool cameraCandidatePreferred(CameraValidation kind,uint32_t frame,Camera
  if(kind!=bestKind)return kind==CameraValidation::Valid;
  return int32_t(frame-bestFrame)>0;
 }
+inline bool cameraViewPreferred(const CameraFrame& frame,CameraValidation kind,const CameraFrame& best,CameraValidation bestKind){
+ if(kind==CameraValidation::Invalid)return false;
+ if(bestKind==CameraValidation::Invalid)return true;
+ if(kind!=bestKind)return kind==CameraValidation::Valid;
+ int rank=cameraSourceRank(frame.sourceType()),bestRank=cameraSourceRank(best.sourceType());
+ return rank!=bestRank?rank>bestRank:int32_t(frame.frame()-best.frame())>0;
+}
 inline CameraCheck inspectCamera(const CameraFrame& c,float w,float h){
  const float*f=c.f.data();for(int i=0;i<32;i++)if(!std::isfinite(f[i])||std::abs(f[i])>1e7f)return {CameraValidation::Invalid,CameraReject::TransformValues,i,f[i]};
  // Offset 860 (slot 215) is the opaque int32 vp_auto_tbn, not a float.
  for(int i=160;i<224;i++)if(i!=215&&(!std::isfinite(f[i])||std::abs(f[i])>1e7f))return {CameraValidation::Invalid,CameraReject::CameraValues,i,f[i]};
- if(!cameraViewportMatches(f[216],f[217],w,h))return {CameraValidation::Invalid,CameraReject::Viewport};
+ if(!cameraViewportMatches(f[216],f[217],w,h,c.sourceType()==5))return {CameraValidation::Invalid,CameraReject::Viewport};
  float norm=f[212]*f[212]+f[213]*f[213]+f[214]*f[214];
  if(norm<.94f||norm>1.06f)return {CameraValidation::Invalid,CameraReject::DirectionNorm};
  if(!c.frame())return {CameraValidation::Invalid,CameraReject::FrameIndex};

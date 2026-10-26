@@ -36,7 +36,7 @@ void logGridFailure(UINT64 width,UINT height){
  for(const auto& line:gameGrid.failureDetails())log("[%s] grid_request=%llu pid=%lu %s",sketch::errorInfo(id).code,request,pid,line.c_str());
 }
 void require(HRESULT hr,const char*what){if(FAILED(hr)){log("[SS-DX12-001] %s: HRESULT=0x%08lx",what,(unsigned long)hr);throw std::runtime_error(what);}}
-void systemDxgi(){static std::once_flag once;std::call_once(once,[]{wchar_t path[MAX_PATH];GetSystemDirectoryW(path,MAX_PATH);wcscat_s(path,L"\\dxgi.dll");realDxgi=LoadLibraryW(path);log("StarSketch %s | camera diagnostics 20261026 | camera picker preview adopt 20261026 | independent DX12 overlay | system DXGI loaded=%d",sketch::CurrentVersion,realDxgi!=nullptr);});}
+void systemDxgi(){static std::once_flag once;std::call_once(once,[]{wchar_t path[MAX_PATH];GetSystemDirectoryW(path,MAX_PATH);wcscat_s(path,L"\\dxgi.dll");realDxgi=LoadLibraryW(path);log("StarSketch %s | camera diagnostics 20261026 | camera picker preview adopt 20261026 | quarter viewport fix 20261026 | camera capture fix 20261027 | independent DX12 overlay | system DXGI loaded=%d",sketch::CurrentVersion,realDxgi!=nullptr);});}
 template<class T>T real(const char*name){systemDxgi();return reinterpret_cast<T>(GetProcAddress(realDxgi,name));}
 void patch(void**slot,void*replacement){DWORD old;if(!VirtualProtect(slot,sizeof(void*),PAGE_READWRITE,&old))throw std::runtime_error("VirtualProtect");InterlockedExchangePointer(slot,replacement);DWORD ignored;VirtualProtect(slot,sizeof(void*),old,&ignored);}
 void hook(void*object,size_t index,void*replacement){void**slot=(*reinterpret_cast<void***>(object))+index;std::lock_guard<std::mutex>lock(hookMutex);if(originals.count(slot))return;originals[slot]=*slot;patch(slot,replacement);}
@@ -113,6 +113,10 @@ public:
   std::lock_guard<std::recursive_mutex>lock(renderMutex);
   try{
    if(!initialized&&!init(swap))return;
+   // Capture request-local validated frames before Win32/ImGui/DX12 calls can
+   // overwrite temporary stack copies. No scanning while idle or browsing.
+   if((!app.cameraPickerOpen&&app.gridRefresh.pending)||(app.cameraPickerOpen&&app.pickerCollecting&&!app.pickerRefreshRequested))
+    gameGrid.captureBeforeOverlay(float(renderWidth),float(renderHeight));
    pollKeyboard();
    auto&f=frames.at(swap->GetCurrentBackBufferIndex());wait(f.fenceValue);
    require(f.allocator->Reset(),"frame allocator reset");require(commands->Reset(f.allocator.p,nullptr),"frame list reset");
