@@ -37,6 +37,21 @@ inline void checkCameraDiagnostics(){
  bad=good;bad.f[235]=1;expect(bad,CameraReject::MapAmount);bad.f[235]=NAN;expect(bad,CameraReject::MapAmount);
  bad=good;bad.f[16]+=1;expect(bad,CameraReject::TransformInverse);
  bad=good;bad.f[176]+=1;expect(bad,CameraReject::ProjectionInverse);
+ // The redundant inverse projection may fail while both the primary transform
+ // pair and projection*view remain self-consistent. Only manual previews admit it.
+ auto preview=good;std::fill(preview.f.begin()+176,preview.f.begin()+192,0.f);
+ assert(matrixInverseError(preview.f.data()+176,preview.f.data()+192)==1.f&&cameraCompositionError(preview)<.025);
+ assert(inspectCamera(preview,3840,2160).reason==CameraReject::ProjectionInverse);
+ assert(inspectCamera(preview,3840,2160,true).result==CameraValidation::Valid);
+ assert(!gridFromCamera(preview,3840,2160,1).usable());
+ auto relaxed=gridFromCamera(preview,3840,2160,1,true,true),normal=gridFromCamera(good,3840,2160,1);
+ assert(relaxed.usable()&&distance(relaxed.at(2,3),normal.at(2,3))<.001f);
+ for(int index:{0,16,160,192,212,216}){
+  auto corrupt=preview;corrupt.f[index]+=10;assert(inspectCamera(corrupt,3840,2160,true).result==CameraValidation::Invalid);
+ }
+ auto corrupt=preview;corrupt.f[178]=NAN;assert(inspectCamera(corrupt,3840,2160,true).reason==CameraReject::CameraValues);
+ corrupt=preview;corrupt.f[235]=1;assert(inspectCamera(corrupt,3840,2160,true).reason==CameraReject::MapAmount);
+ for(uint32_t source:{5u,99u}){corrupt=preview;std::memcpy(corrupt.f.data()+226,&source,4);assert(inspectCamera(corrupt,3840,2160,true).result==CameraValidation::Invalid);}
  bad=good;bad.f[210]=1000;expect(bad,CameraReject::ForwardDepth);
  auto mirrored=good;for(int base:{0,192})for(int col=0;col<4;++col)mirrored.f[base+col]*=-1;
  for(int base:{16,176})for(int row=0;row<4;++row)mirrored.f[base+row*4]*=-1;

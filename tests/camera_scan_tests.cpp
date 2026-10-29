@@ -16,6 +16,8 @@ struct GameGridReaderTestAccess {
   reader.candidates={{reinterpret_cast<uintptr_t>(camera),camera->frame(),camera->f[211]}};
  }
  static void append(GameGridReader& reader,CameraFrame* camera){reader.candidates.push_back({reinterpret_cast<uintptr_t>(camera),camera->frame(),camera->f[211]});}
+ static void sceneImage(GameGridReader& reader,uintptr_t image,CameraFrame* camera){reader.checked=true;reader.supported=true;reader.image=image;reader.candidates={{reinterpret_cast<uintptr_t>(camera),camera->frame(),camera->f[211]}};}
+ static void preferOriginal(GameGridReader& reader){reader.preferScene=false;}
  static void finishCollection(GameGridReader& reader){reader.started=GetTickCount64()-GameGridReader::PickCollectMs;}
  static void timeout(GameGridReader& reader){reader.started=GetTickCount64()-1801;}
  static void expireCapture(GameGridReader& reader){reader.capturedAt=GetTickCount64()-GameGridReader::CaptureLifetimeMs-1;}
@@ -27,6 +29,7 @@ struct GameGridReaderTestAccess {
   },stats);assert(stats.bytes==960);
  }
  static void offer(GameGridReader& reader,uintptr_t address,const CameraFrame& frame){reader.offerChoice(address,frame);}
+ static void actors(GameGridReader& reader,std::initializer_list<std::array<float,3>> positions){reader.actors=positions;}
  static size_t historySize(const GameGridReader& reader){return reader.observations.size();}
  static size_t movedCount(const GameGridReader& reader){return reader.movedFresh;}
  static void pressure(GameGridReader& reader,const CameraFrame& main){
@@ -39,6 +42,53 @@ struct GameGridReaderTestAccess {
   assert(reader.candidates.size()==GameGridReader::PickMaxCandidates&&std::any_of(reader.candidates.begin(),reader.candidates.end(),[](auto c){return c.sourceType==8;}));
  }
 };
+}
+void checkSceneCameraReaderFixture(uintptr_t image,CameraFrame* raw,const SceneCameraPose& pose){
+ GameGridReader reader;GameGridReaderTestAccess::sceneImage(reader,image,raw);
+ *raw={};assert(reader.begin(3840,2160,false,1)); // No actors or stack metadata.
+ Grid grid;assert(reader.poll(grid)==GameGridState::Preview&&reader.error==ErrorId::None&&!grid.usable());
+ auto independent=reader.pickerOptions();assert(independent.size()==1&&independent[0].scenePose&&!independent[0].sceneCorroborated);
+ assert(independent[0].camera.frame()==0); // Never manufacture engine counters.
+ *raw=gameCameraFixture();raw->f[0]=NAN;GameGridReaderTestAccess::sceneImage(reader,image,raw);assert(reader.begin(3840,2160,true,1));
+ assert(reader.poll(grid)==GameGridState::Preview);
+ uint32_t next=raw->frame()+1;std::memcpy(raw->f.data()+225,&next,4);raw->f[211]+=.016f;raw->f[235]=1;
+ assert(reader.poll(grid)==GameGridState::Preview&&!reader.pickerOptions()[0].sceneCorroborated); // Map stack evidence cannot corroborate the independent manual pose.
+ raw->f[235]=0;next=raw->frame()+1;std::memcpy(raw->f.data()+225,&next,4);raw->f[211]+=.016f;
+ assert(reader.poll(grid)==GameGridState::Preview);auto options=reader.pickerOptions();assert(!options.empty()&&options[0].scenePose);
+ auto projected=cameraOptionGrid(options[0],3840,2160,1,0);assert(projected.usable()&&length(projected.origin-pose.grid(3840,2160,1).origin)<.001f);
+ // Like original stack choices, a freshly captured manual snapshot survives
+ // a later transient source failure during bounded picker collection.
+ *raw=gameCameraFixture();GameGridReaderTestAccess::sceneImage(reader,image,raw);
+ assert(reader.beginPicking(3840,2160,1));raw->f[0]=NAN;
+ GameGridReaderTestAccess::actors(reader,{{5,100,20}});
+ next=raw->frame()+1;std::memcpy(raw->f.data()+225,&next,4);raw->f[211]+=.016f;
+ assert(reader.pollPicking()==GameGridState::Waiting);
+ options=reader.pickerOptions();assert(!options.empty()&&options[0].scenePose);
+ assert(options[0].suggestedZ==1&&!options[0].actorLayer);
+ auto orientation=reinterpret_cast<float*>(*reinterpret_cast<uintptr_t*>(image+0xb69600)+0x3db0);
+ float saved=orientation[0];orientation[0]=NAN;
+ GameGridReaderTestAccess::finishCollection(reader);
+ assert(reader.pollPicking()==GameGridState::Ready);
+ auto retained=reader.pickerOptions();assert(!retained.empty()&&retained[0].scenePose);
+ assert(retained[0].pose.orientation==options[0].pose.orientation);
+ orientation[0]=saved;reader.cancelPicking();assert(reader.pickerOptions().empty());
+ // A failed new-source signature retains the original strict Ready path.
+ auto code=reinterpret_cast<unsigned char*>(image)+0x1100;*code^=1;*raw=gameCameraFixture();
+ GameGridReaderTestAccess::sceneImage(reader,image,raw);assert(reader.begin(3840,2160,true,1));
+ next=raw->frame()+1;std::memcpy(raw->f.data()+225,&next,4);raw->f[211]+=.016f;
+ assert(reader.poll(grid)==GameGridState::Ready&&grid.usable());for(const auto& option:reader.pickerOptions())assert(!option.scenePose);*code^=1;
+ // Invalid scene source does not mask an old-source preview without actors.
+ *code^=1;GameGridReaderTestAccess::sceneImage(reader,image,raw);assert(reader.begin(3840,2160,false,1));
+ next=raw->frame()+1;std::memcpy(raw->f.data()+225,&next,4);raw->f[211]+=.016f;
+ assert(reader.poll(grid)==GameGridState::Preview&&reader.error==ErrorId::None&&!reader.pickerOptions()[0].scenePose);
+ // Both sources unavailable: wait for the request budget before reporting.
+ *raw={};GameGridReaderTestAccess::sceneImage(reader,image,raw);assert(reader.begin(3840,2160,false,1));
+ assert(reader.poll(grid)==GameGridState::Waiting);GameGridReaderTestAccess::timeout(reader);
+ assert(reader.poll(grid)==GameGridState::Unavailable&&reader.error!=ErrorId::None&&reader.pickerOptions().empty());*code^=1;
+ // Explicit original preference still keeps the independent source as fallback.
+ GameGridReaderTestAccess::sceneImage(reader,image,raw);GameGridReaderTestAccess::preferOriginal(reader);
+ assert(reader.begin(3840,2160,false,1)&&reader.poll(grid)==GameGridState::Waiting);
+ GameGridReaderTestAccess::timeout(reader);assert(reader.poll(grid)==GameGridState::Preview&&reader.error==ErrorId::None&&reader.pickerOptions()[0].scenePose);
 }
 void checkAdvisoryBuild(){
  struct Type{uint32_t tag=7,pad=0;int64_t size=1320,count=8;uintptr_t data=0;};
@@ -117,6 +167,28 @@ void checkAdvisoryBuild(){
   assert(cameraOptionGrid(options[0],output.x,output.y,1,0).usable());
   reader.cancelPicking();
   }
+  // Internal 16:9 on 16:10 / classic / ultrawide outputs is preview-only.
+  // Stale frames, corrupt primary matrices and map views remain rejected.
+  for(Point output:std::vector<Point>{{2560,1600},{1920,1200},{1600,1200},{1280,1024},{2560,1080},{3440,1440},{5120,1440}}){
+   *camera=gameCameraFixture();camera->f[216]=1.f/2560;camera->f[217]=1.f/1440;
+   GameGridReaderTestAccess::fixture(reader,&managerSlot,verified,camera.get());
+   assert(reader.begin(output.x,output.y,true,1));GameGridReaderTestAccess::timeout(reader);
+   assert(reader.poll(preview)==GameGridState::Unavailable&&reader.pickerOptions().empty());
+   assert(reader.begin(output.x,output.y,true,1));
+   next=camera->frame()+1;std::memcpy(camera->f.data()+225,&next,4);camera->f[211]+=.016f;
+   GameGridReaderTestAccess::scanFixture(reader,camera.get());GameGridReaderTestAccess::timeout(reader);
+   assert(reader.poll(preview)==GameGridState::Preview&&reader.error==ErrorId::None);
+   options=reader.pickerOptions();assert(options.size()==1&&options[0].aspectUnverified&&!options[0].projectionUnverified);
+   assert(cameraOptionGrid(options[0],output.x,output.y,1,0).usable());
+   assert(validateCamera(*camera,output.x,output.y)==CameraValidation::Invalid);
+   for(bool map:{false,true}){
+    if(map)camera->f[235]=1;else camera->f[0]=NAN;
+    assert(reader.begin(output.x,output.y,true,1));
+    next=camera->frame()+1;std::memcpy(camera->f.data()+225,&next,4);camera->f[211]+=.016f;
+    GameGridReaderTestAccess::timeout(reader);assert(reader.poll(preview)==GameGridState::Unavailable&&reader.pickerOptions().empty());
+    camera->f[0]=gameCameraFixture().f[0];
+   }
+  }
   // A complete fresh copy captured before overlay work survives later source
   // overwrite. It is request-local, bounded in age, and still checks the level.
   *camera=gameCameraFixture();GameGridReaderTestAccess::fixture(reader,&managerSlot,verified,camera.get());
@@ -156,17 +228,45 @@ void checkAdvisoryBuild(){
   *camera=gameCameraFixture();uint32_t auxiliary=5;std::memcpy(camera->f.data()+226,&auxiliary,4);
   GameGridReaderTestAccess::fixture(reader,&managerSlot,verified,camera.get());assert(reader.begin(3840,2160,true,1));
   next=camera->frame()+1;std::memcpy(camera->f.data()+225,&next,4);camera->f[211]+=.016f;
-  GameGridReaderTestAccess::timeout(reader);assert(reader.poll(preview)==GameGridState::Unavailable&&reader.error==ErrorId::AuxiliaryCameraOnly);
+  GameGridReaderTestAccess::timeout(reader);assert(reader.poll(preview)==GameGridState::Preview&&reader.error==ErrorId::None);
   assert(reader.beginPicking(3840,2160,1));
   next=camera->frame()+1;std::memcpy(camera->f.data()+225,&next,4);camera->f[211]+=.016f;
   reader.captureBeforeOverlay(3840,2160);camera->f[178]=NAN;GameGridReaderTestAccess::finishCollection(reader);
   assert(reader.pollPicking()==GameGridState::Ready&&reader.pickerOptions().size()==1);
   assert(reader.pickerOptions()[0].camera.sourceType()==5&&cameraOptionGrid(reader.pickerOptions()[0],3840,2160,1,0).usable());
+  // An automatic recovery preview must honor an explicitly chosen height.
+  *camera=gameCameraFixture();std::memcpy(camera->f.data()+226,&auxiliary,4);
+  GameGridReaderTestAccess::fixture(reader,&managerSlot,verified,camera.get());assert(reader.begin(3840,2160,true,3));
+  GameGridReaderTestAccess::actors(reader,{{5,5,1}});
+  next=camera->frame()+1;std::memcpy(camera->f.data()+225,&next,4);camera->f[211]+=.016f;
+  GameGridReaderTestAccess::timeout(reader);assert(reader.poll(preview)==GameGridState::Preview);
+  options=reader.pickerOptions();assert(options.size()==1&&options[0].suggestedZ==3&&!options[0].actorLayer);
+  // The suggested actor can be in front of a reflected camera while its
+  // horizontal plane is behind the forward ray. Keep the usable supplied
+  // picker height instead of dropping the entire fresh camera.
+  assert(reader.beginPicking(3840,2160,1));GameGridReaderTestAccess::actors(reader,{{5,100,20}});
+  next=camera->frame()+1;std::memcpy(camera->f.data()+225,&next,4);camera->f[211]+=.016f;
+  GameGridReaderTestAccess::finishCollection(reader);assert(reader.pollPicking()==GameGridState::Ready);
+  options=reader.pickerOptions();assert(options.size()==1&&options[0].suggestedZ==1&&!options[0].actorLayer);
+  // A validated auxiliary camera with no usable geometry still reports 013;
+  // recovery must not enable an invalid grid merely to suppress the error.
+  assert(reader.begin(3840,2160,true,20));
+  next=camera->frame()+1;std::memcpy(camera->f.data()+225,&next,4);camera->f[211]+=.016f;
+  GameGridReaderTestAccess::timeout(reader);assert(reader.poll(preview)==GameGridState::Unavailable&&reader.error==ErrorId::AuxiliaryCameraOnly);
+  assert(reader.pickerOptions().empty());
+  {auto detail=reader.failureDetails();assert(std::any_of(detail.begin(),detail.end(),[](const auto& line){return line.find("geometry_rejected=1")!=std::string::npos;}));}
+  // A strict main camera can be numerically sound yet unusable at this plane.
+  // Its failure must not hide another source's visible manual grid.
+  *duplicate=quarterCameraFixture();std::memcpy(duplicate->f.data()+226,&auxiliary,4);
+  *camera=gameCameraFixture();GameGridReaderTestAccess::fixture(reader,&managerSlot,verified,camera.get());GameGridReaderTestAccess::append(reader,duplicate.get());
+  assert(gridFromCamera(*duplicate,3840,2160,20,true).usable());assert(reader.begin(3840,2160,true,20));
+  for(auto item:{camera.get(),duplicate.get()}){next=item->frame()+1;std::memcpy(item->f.data()+225,&next,4);item->f[211]+=.016f;}
+  assert(reader.poll(preview)==GameGridState::Preview&&reader.error==ErrorId::None&&!reader.pickerOptions().empty());
   for(Point internal:std::vector<Point>{{480,270},{640,360},{320,180}}){
    *camera=quarterCameraFixture();std::memcpy(camera->f.data()+226,&auxiliary,4);camera->f[216]=1/internal.x;camera->f[217]=1/internal.y;
    GameGridReaderTestAccess::fixture(reader,&managerSlot,verified,camera.get());assert(reader.begin(3840,2160,true,1));
    next=camera->frame()+1;std::memcpy(camera->f.data()+225,&next,4);camera->f[211]+=.016f;
-   GameGridReaderTestAccess::timeout(reader);assert(reader.poll(preview)==GameGridState::Unavailable&&reader.error==ErrorId::AuxiliaryCameraOnly);
+   GameGridReaderTestAccess::timeout(reader);assert(reader.poll(preview)==GameGridState::Preview&&reader.error==ErrorId::None);
    assert(reader.beginPicking(3840,2160,1));next=camera->frame()+1;std::memcpy(camera->f.data()+225,&next,4);camera->f[211]+=.016f;
    GameGridReaderTestAccess::finishCollection(reader);assert(reader.pollPicking()==GameGridState::Ready&&reader.pickerOptions().size()==1);
   }
@@ -182,7 +282,10 @@ void checkAdvisoryBuild(){
   GameGridReaderTestAccess::pressure(reader,*camera);
  }
 }
-int main(){
+void checkCameraWorker();
+void checkSceneCamera(const char* filename);
+int main(int argc,char** argv){
+ checkCameraWorker();
  checkAdvisoryBuild();
  // A large sparse stack with a guard, a hole, a chunk boundary and adjacent
  // readable regions with different protections. No game process is involved.
@@ -232,4 +335,5 @@ int main(){
  assert(!reader.begin(1920,1080,true,1.75f)&&reader.requestId()==2);
  assert(reader.failureDetails()[0].find("height_override=1 requested_z=1.75")!=std::string::npos);
  std::cout<<"PASS: sparse stack over 8 MiB, guard preserved, unreadable pages skipped, chunk/region-spanning cameras and invalid frame rejection\n";
+ checkSceneCamera(argc>1?argv[1]:nullptr);
 }

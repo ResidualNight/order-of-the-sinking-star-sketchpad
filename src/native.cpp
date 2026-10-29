@@ -11,7 +11,7 @@
 #include "backends/imgui_impl_win32.h"
 #include "ui.hpp"
 #include "ui_glyphs.hpp"
-#include "game_grid.hpp"
+#include "game_grid_worker.hpp"
 #include "preferences.hpp"
 #include "update_check.hpp"
 #include <atomic>
@@ -26,8 +26,9 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND,UINT,WPARAM,LP
 namespace {
 template<class T>struct Com{T*p=nullptr;~Com(){reset();}Com()=default;Com(const Com&)=delete;Com&operator=(const Com&)=delete;Com(Com&&b)noexcept:p(b.p){b.p=nullptr;}Com&operator=(Com&&b)noexcept{reset();p=b.p;b.p=nullptr;return*this;}void reset(){if(p){p->Release();p=nullptr;}}T**put(){reset();return&p;}T*operator->()const{return p;}operator bool()const{return p!=nullptr;}};
 HMODULE ownModule=nullptr,realDxgi=nullptr;std::recursive_mutex renderMutex;std::mutex hookMutex;std::map<void**,void*> originals;
-ULONGLONG lastMouseMessage[3]{};std::atomic<bool> editing{false};HIMC savedImeContext=nullptr;bool imeDetached=false;sketch::App app;sketch::GameGridReader gameGrid;sketch::PreferenceStore preferences;WNDPROC previousWndProc=nullptr;HWND gameWindow=nullptr;
+ULONGLONG lastMouseMessage[3]{};std::atomic<bool> editing{false};HIMC savedImeContext=nullptr;bool imeDetached=false;sketch::App app;sketch::GameGridWorker gameGrid;sketch::FeedbackLauncher feedback;sketch::PreferenceStore preferences;WNDPROC previousWndProc=nullptr;HWND gameWindow=nullptr;
 std::wstring basePath(){wchar_t buffer[32768];DWORD n=GetModuleFileNameW(ownModule,buffer,32768);std::wstring path(buffer,n);return path.substr(0,path.find_last_of(L"\\/")+1);}
+std::wstring gameDirectory(){wchar_t buffer[32768];DWORD n=GetModuleFileNameW(nullptr,buffer,32768);if(!n||n>=32768)return {};std::wstring path(buffer,n);auto slash=path.find_last_of(L"\\/");return slash==std::wstring::npos?std::wstring():path.substr(0,slash+1);}
 void log(const char*fmt,...){char line[2048];va_list args;va_start(args,fmt);vsnprintf(line,sizeof(line),fmt,args);va_end(args);std::wstring path=basePath()+L"StarSketch.log";HANDLE file=CreateFileW(path.c_str(),FILE_APPEND_DATA,FILE_SHARE_READ|FILE_SHARE_WRITE,nullptr,OPEN_ALWAYS,FILE_ATTRIBUTE_NORMAL,nullptr);if(file!=INVALID_HANDLE_VALUE){DWORD done;WriteFile(file,line,(DWORD)strlen(line),&done,nullptr);WriteFile(file,"\r\n",2,&done,nullptr);CloseHandle(file);}}
 void logGridFailure(UINT64 width,UINT height){
  auto id=gameGrid.error==sketch::ErrorId::None?sketch::ErrorId::UnknownGameGrid:gameGrid.error;
@@ -36,8 +37,18 @@ void logGridFailure(UINT64 width,UINT height){
  for(const auto& line:gameGrid.failureDetails())log("[%s] grid_request=%llu pid=%lu %s",sketch::errorInfo(id).code,request,pid,line.c_str());
 }
 void require(HRESULT hr,const char*what){if(FAILED(hr)){log("[SS-DX12-001] %s: HRESULT=0x%08lx",what,(unsigned long)hr);throw std::runtime_error(what);}}
-void systemDxgi(){static std::once_flag once;std::call_once(once,[]{wchar_t path[MAX_PATH];GetSystemDirectoryW(path,MAX_PATH);wcscat_s(path,L"\\dxgi.dll");realDxgi=LoadLibraryW(path);log("StarSketch %s | camera diagnostics 20261026 | camera picker preview adopt 20261026 | quarter viewport fix 20261026 | camera capture fix 20261027 | independent DX12 overlay | system DXGI loaded=%d",sketch::CurrentVersion,realDxgi!=nullptr);});}
+void systemDxgi(){static std::once_flag once;std::call_once(once,[]{wchar_t path[MAX_PATH];GetSystemDirectoryW(path,MAX_PATH);wcscat_s(path,L"\\dxgi.dll");realDxgi=LoadLibraryW(path);log("StarSketch %s | camera diagnostics 20261026 | camera picker preview adopt 20261026 | quarter viewport fix 20261026 | camera capture fix 20261027 | background camera sampling 20261029 | camera recovery preview 20261029 | error report helper 20261029 | scene camera preview 20261029 | %s | independent DX12 overlay | system DXGI loaded=%d",sketch::CurrentVersion,sketch::DiagnosticsBuild,realDxgi!=nullptr);});}
 template<class T>T real(const char*name){systemDxgi();return reinterpret_cast<T>(GetProcAddress(realDxgi,name));}
+std::string graphicsEnvironment(ID3D12Device* device){
+ auto create=real<HRESULT(WINAPI*)(REFIID,void**)>("CreateDXGIFactory1");Com<IDXGIFactory4> factory;Com<IDXGIAdapter1> adapter;DXGI_ADAPTER_DESC1 desc{};
+ if(!create||FAILED(create(__uuidof(IDXGIFactory4),(void**)factory.put()))||FAILED(factory->EnumAdapterByLuid(device->GetAdapterLuid(),__uuidof(IDXGIAdapter1),(void**)adapter.put()))||FAILED(adapter->GetDesc1(&desc)))return "显卡：未取得\r\n驱动：未取得";
+ int count=WideCharToMultiByte(CP_UTF8,0,desc.Description,-1,nullptr,0,nullptr,nullptr);std::string name;
+ if(count>0){name.resize(size_t(count));WideCharToMultiByte(CP_UTF8,0,desc.Description,-1,name.data(),count,nullptr,nullptr);name.pop_back();}
+ char text[160];std::snprintf(text,sizeof(text)," (vendor=%04x device=%04x, VRAM=%llu MiB)",desc.VendorId,desc.DeviceId,static_cast<unsigned long long>(desc.DedicatedVideoMemory/(1024*1024)));
+ std::string result="显卡："+(name.empty()?"未取得":name)+text+"\r\n驱动：";LARGE_INTEGER version{};
+ if(SUCCEEDED(adapter->CheckInterfaceSupport(__uuidof(IDXGIDevice),&version))){std::snprintf(text,sizeof(text),"%u.%u.%u.%u",unsigned(HIWORD(version.HighPart)),unsigned(LOWORD(version.HighPart)),unsigned(HIWORD(version.LowPart)),unsigned(LOWORD(version.LowPart)));result+=text;}else result+="未取得";
+ return result;
+}
 void patch(void**slot,void*replacement){DWORD old;if(!VirtualProtect(slot,sizeof(void*),PAGE_READWRITE,&old))throw std::runtime_error("VirtualProtect");InterlockedExchangePointer(slot,replacement);DWORD ignored;VirtualProtect(slot,sizeof(void*),old,&ignored);}
 void hook(void*object,size_t index,void*replacement){void**slot=(*reinterpret_cast<void***>(object))+index;std::lock_guard<std::mutex>lock(hookMutex);if(originals.count(slot))return;originals[slot]=*slot;patch(slot,replacement);}
 template<class T>T original(void*object,size_t index){std::lock_guard<std::mutex>lock(hookMutex);return reinterpret_cast<T>(originals.at((*reinterpret_cast<void***>(object))+index));}
@@ -93,6 +104,7 @@ public:
    auto preferenceError=preferences.load(app);if(preferenceError!=sketch::ErrorId::None)log("%s",sketch::errorMessage(preferenceError).c_str());
    ImGui::StyleColorsDark();auto&style=ImGui::GetStyle();style.WindowRounding=7;style.FrameRounding=3;style.WindowBorderSize=1;style.Colors[ImGuiCol_WindowBg]={.035f,.055f,.085f,.96f};style.Colors[ImGuiCol_Border]={.64f,.51f,.27f,.9f};style.Colors[ImGuiCol_Button]={.18f,.20f,.23f,1};style.Colors[ImGuiCol_ButtonHovered]={.34f,.30f,.20f,1};style.Colors[ImGuiCol_FrameBg]={.12f,.16f,.21f,1};style.Colors[ImGuiCol_SliderGrab]={.76f,.61f,.32f,1};style.Colors[ImGuiCol_Text]={.87f,.84f,.73f,1};
    ImGui_ImplWin32_Init(desc.OutputWindow);gameWindow=desc.OutputWindow;previousWndProc=(WNDPROC)SetWindowLongPtrW(gameWindow,GWLP_WNDPROC,(LONG_PTR)windowProc);if(!previousWndProc)throw std::runtime_error("window subclass failed");hookGameInput();context=true;PostMessageW(gameWindow,DisableGameImeMessage,0,0);log("UI initialized; keyboard E toggles drawing");}
+  app.reportContext.graphics=graphicsEnvironment(device.p);
   D3D12_DESCRIPTOR_HEAP_DESC hd{};hd.Type=D3D12_DESCRIPTOR_HEAP_TYPE_RTV;hd.NumDescriptors=desc.BufferCount;require(device->CreateDescriptorHeap(&hd,__uuidof(ID3D12DescriptorHeap),(void**)rtvHeap.put()),"RTV heap");hd.Type=D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;hd.NumDescriptors=2;hd.Flags=D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;require(device->CreateDescriptorHeap(&hd,__uuidof(ID3D12DescriptorHeap),(void**)srvHeap.put()),"SRV heap");frames.resize(desc.BufferCount);UINT step=device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);auto handle=rtvHeap->GetCPUDescriptorHandleForHeapStart();
   for(UINT i=0;i<desc.BufferCount;i++){auto&f=frames[i];require(device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT,__uuidof(ID3D12CommandAllocator),(void**)f.allocator.put()),"allocator");require(swap->GetBuffer(i,__uuidof(ID3D12Resource),(void**)f.buffer.put()),"backbuffer");f.rtv=handle;device->CreateRenderTargetView(f.buffer.p,nullptr,handle);handle.ptr+=step;}
   require(device->CreateCommandList(0,D3D12_COMMAND_LIST_TYPE_DIRECT,frames[0].allocator.p,nullptr,__uuidof(ID3D12GraphicsCommandList),(void**)commands.put()),"command list");commands->Close();if(!fence){require(device->CreateFence(0,D3D12_FENCE_FLAG_NONE,__uuidof(ID3D12Fence),(void**)fence.put()),"fence");fenceEvent=CreateEventW(nullptr,FALSE,FALSE,nullptr);if(!fenceEvent)throw std::runtime_error("fence event create");}
@@ -113,10 +125,9 @@ public:
   std::lock_guard<std::recursive_mutex>lock(renderMutex);
   try{
    if(!initialized&&!init(swap))return;
-   // Capture request-local validated frames before Win32/ImGui/DX12 calls can
-   // overwrite temporary stack copies. No scanning while idle or browsing.
-   if((!app.cameraPickerOpen&&app.gridRefresh.pending)||(app.cameraPickerOpen&&app.pickerCollecting&&!app.pickerRefreshRequested))
-    gameGrid.captureBeforeOverlay(float(renderWidth),float(renderHeight));
+   // Sampling runs between Present calls too, while the game's temporary main
+   // view still exists. Stop work as soon as its UI request is no longer active.
+   if((!app.cameraPickerOpen&&!app.gridRefresh.pending)||(app.cameraPickerOpen&&!app.pickerCollecting))gameGrid.cancel();
    pollKeyboard();
    auto&f=frames.at(swap->GetCurrentBackBufferIndex());wait(f.fenceValue);
    require(f.allocator->Reset(),"frame allocator reset");require(commands->Reset(f.allocator.p,nullptr),"frame list reset");
@@ -154,7 +165,7 @@ public:
    }else if(refresh.ready()){
     gameGrid.cancelPicking();
     if(!refresh.pending){
-     refresh.pending=gameGrid.begin(float(desc.Width),float(desc.Height),app.gridPlaneOverride,app.gridPlaneZ);
+     refresh.pending=gameGrid.begin(float(desc.Width),float(desc.Height),app.gridPlaneOverride,app.gridPlaneZ,app.gridPreferScene);
      log("Game grid localization started: %llux%u",(unsigned long long)desc.Width,desc.Height);
      if(!refresh.pending){
       app.rejectGameGrid(gameGrid.error);
@@ -164,7 +175,11 @@ public:
      sketch::Grid projected;auto state=gameGrid.poll(projected);
      if(state==sketch::GameGridState::Ready){
       app.acceptGameGrid(projected,gameGrid.directionCategory,float(desc.Width),float(desc.Height),gameGrid.planeZ);
-      log("%sGame grid: %s direction_choice=%d direction_confirmed=%d",app.gridDirectionPending?"[SS-GRID-011] ":"",gameGrid.diagnostic.c_str(),app.gridDirection,app.gridConfirmed?1:0);
+      log("Game grid: %s direction_choice=%d direction_confirmed=%d",gameGrid.diagnostic.c_str(),app.gridDirection,app.gridConfirmed?1:0);
+     }else if(state==sketch::GameGridState::Preview){
+      app.acceptCameraRecoveryOptions(gameGrid.pickerOptions(),float(desc.Width),float(desc.Height));
+      log("Camera preview available: request=%llu choices=%zu %s",static_cast<unsigned long long>(gameGrid.requestId()),gameGrid.pickerOptions().size(),gameGrid.diagnostic.c_str());
+      for(const auto& detail:gameGrid.failureDetails())log("Camera preview request=%llu %s",static_cast<unsigned long long>(gameGrid.requestId()),detail.c_str());
      }else if(state==sketch::GameGridState::Unavailable){
       app.rejectGameGrid(gameGrid.error);
       logGridFailure(desc.Width,desc.Height);
@@ -173,8 +188,31 @@ public:
    }
    bool settingsWereOpen=app.settingsOpen;int previousDirection=app.gridDirection;bool directionWasConfirmed=app.gridConfirmed;
    auto previousAdoptions=app.cameraPreviewAdoptions;int selectedCamera=app.selectedCamera;
+   bool selectedSceneCamera=app.gridRecoveryPending?app.gridRecoveryScene:(app.selectedCameraOption()&&app.selectedCameraOption()->scenePose);
+   sketch::FeedbackResult reportResult;
+   if(feedback.takeResult(reportResult)){
+    app.reportFeedback=sketch::feedbackResultMessage(reportResult);
+    if(reportResult.action==sketch::FeedbackAction::CopyDiagnostics){
+     if(reportResult.diagnosticsCopied)log("Error report helper: diagnostics_copied=1");else log("[SS-REPORT-003] Error report helper: clipboard_error=%lu",reportResult.clipboardError);
+    }else{
+     if(!reportResult.folderOpened)log("[SS-REPORT-001] Error report helper: folder_error=%lu",reportResult.folderError);
+     if(!reportResult.addressCopied)log("[SS-REPORT-002] Error report helper: clipboard_error=%lu",reportResult.clipboardError);
+     if(reportResult.folderOpened&&reportResult.addressCopied)log("Error report helper: game_folder_opened=1 email_copied=1");
+    }
+   }
+   app.reportBusy=feedback.busy();
+   app.reportContext.outputWidth=uint32_t(desc.Width);app.reportContext.outputHeight=desc.Height;
+   RECT client{};if(GetClientRect(gameWindow,&client)){app.reportContext.windowWidth=uint32_t(std::max(0L,client.right-client.left));app.reportContext.windowHeight=uint32_t(std::max(0L,client.bottom-client.top));}else app.reportContext.windowWidth=app.reportContext.windowHeight=0;
+   app.reportContext.gridRequest=gameGrid.requestId();
    app.editing=editing.load();app.frame(io.DisplaySize.x,io.DisplaySize.y);
-   if(app.cameraPreviewAdoptions!=previousAdoptions)log("Camera picker preview adopted: candidate=%d flip=%d pinned=1 snapping=%d",selectedCamera+1,app.pickerFlip,app.snappingReady()?1:0);
+   if(app.reportRequested){app.reportRequested=false;feedback.start(gameDirectory(),reinterpret_cast<uintptr_t>(gameWindow));app.reportBusy=feedback.busy();}
+   if(app.reportCopyRequested){
+    app.reportCopyRequested=false;BOOL fullscreen=FALSE;auto info=app.reportDiagnostics();
+    if(SUCCEEDED(swap->GetFullscreenState(&fullscreen,nullptr)))info.windowMode=fullscreen?"独占全屏":(GetWindowLongW(gameWindow,GWL_STYLE)&WS_CAPTION)?"窗口":"无边框窗口";
+    info.graphics+="\r\n交换链格式："+std::to_string(unsigned(format))+"; buffers="+std::to_string(frames.size());
+    feedback.startDiagnostics(info,reinterpret_cast<uintptr_t>(gameWindow));app.reportBusy=feedback.busy();
+   }
+   if(app.cameraPreviewAdoptions!=previousAdoptions)log("Camera picker preview adopted: candidate=%d flip=%d pinned=1 snapping=%d source=%s",selectedCamera+1,app.pickerFlip,app.snappingReady()?1:0,selectedSceneCamera?"scene_pose":"stack");
    if(app.gridFromGame&&(previousDirection!=app.gridDirection||directionWasConfirmed!=app.gridConfirmed))log("Grid direction: category=%d choice=%d confirmed=%d",app.gridDirectionCategory,app.gridDirection,app.gridConfirmed?1:0);
    auto preferenceError=preferences.update(app,sketch::GridRefresh::now(),settingsWereOpen&&!app.settingsOpen);if(preferenceError!=sketch::ErrorId::None)log("%s",sketch::errorMessage(preferenceError).c_str());
    if(app.editing!=editing.load())setEditing(app.editing);

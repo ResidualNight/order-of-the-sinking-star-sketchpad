@@ -7,9 +7,11 @@
 #include "level_watch.hpp"
 #include "update_notice.hpp"
 #include "camera_picker.hpp"
+#include "feedback.hpp"
 #include "imgui.h"
 #include <string>
 #include <set>
+#include <memory>
 namespace sketch {
 class App {
 public:
@@ -23,6 +25,12 @@ public:
  bool gridConfirmed=false,gridPinned=false;bool editing=false,gridEnabled=false,tint=false,cameraPickerOpen=false,wantExit=false;
  Grid pickerPreviousGrid;bool pickerPreviousPinned=false;uint64_t cameraPreviewAdoptions=0;
  GridRefresh gridRefresh;
+ bool gridPreferScene=true; // One request only; never persisted.
+ bool gridRecoveryPending=false,gridRecoveryScene=false;
+ std::unique_ptr<CameraOption> recoveryOption;
+ int recoveryAspect=0,recoveryFit=0,pickerAspect=0,pickerFit=0;
+ void updateRecoveryMapping();
+ bool adoptRecoveryGrid();
  uint64_t availableUpdate=0;
  ErrorId gameBuildWarning=ErrorId::None;
  LevelWatch levelWatch;bool autoClearOnLevel=false,levelPaused=false;
@@ -33,6 +41,8 @@ public:
  ImGuiKey captureKey=ImGuiKey_None;ImGuiKeyChord captureMods=0;
  std::string bindingStatus,preferencesStatus="设置与键位会自动保存，重启游戏后恢复";ErrorId inputError=ErrorId::None;float numberRadius=26;ImFont* numberFont=nullptr;std::string status;
  std::vector<CameraOption> cameraOptions;int selectedCamera=-1,pickerFlip=0,pickerPlaceFrames=0;
+ bool reportOpen=false,reportRequested=false,reportCopyRequested=false,reportBusy=false;std::string reportError,reportFeedback;
+ ReportDiagnostics reportContext;
  bool pickerRefreshRequested=false,pickerCollecting=false,pickerHeightOverride=false;
  float pickerWidth=0,pickerHeight=0,pickerZ=1;
  Mark current;bool drawing=false,erasing=false,eraseChanged=false;Snapshot eraseBefore;Point eraseLast;
@@ -48,15 +58,21 @@ public:
  bool observeLevel(const LevelIdentity* identity,uint64_t now);
  bool setEditing(bool enabled);
  void requestGrid(bool resized=false);
+ void requestOriginalGrid(){requestGrid();gridPreferScene=false;gridEnabled=true;}
  void finishGesture();
  void cancelGesture(){drawing=false;current.points.clear();}
  void startCameraPicker();void cancelCameraPicker(bool restorePrevious=true);
- bool snappingReady()const{return gridEnabled&&gridConfirmed&&!levelPaused&&!cameraPickerOpen&&grid.usable();}
+ bool snappingReady()const{return gridEnabled&&gridConfirmed&&!levelPaused&&!cameraPickerOpen&&!reportOpen&&grid.usable();}
  void acceptCameraOptions(const std::vector<CameraOption>& options,float width,float height);
+ void acceptCameraRecoveryOptions(const std::vector<CameraOption>& options,float width,float height);
  void selectCamera(int index);Grid cameraPickerPreview()const;const CameraOption* selectedCameraOption()const;
  bool adoptCameraPreview();void failCameraPicker(ErrorId error);
  void resize(float width,float height);
+ bool hasReportableError()const;
+ void openErrorReport();void checkReportCamera();
+ ReportDiagnostics reportDiagnostics()const;
 private:
+ void reportButton();void errorReportPanel(float width,float height);
  void panel();void cameraPickerPanel(float width,float height);void settingsPanel();void shortcuts();void numberCells(Point cell);void restartNumbers();void canvas(float width,float height);void drawMark(ImDrawList* dl,const Mark&m,bool preview=false);void drawGrid(ImDrawList* dl,float width,float height,const Grid* preview=nullptr);
 };
 }

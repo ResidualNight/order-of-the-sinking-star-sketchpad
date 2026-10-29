@@ -1,0 +1,14 @@
+Source: https://github.com/qiekn/ootss-cmd
+Reference commit: cf432e95962b946c80a9e6fdea6dba307dc757c9
+Camera discovery profile and runtime pose/axis research: qiekn/ootss-cmd.
+StarSketch independently implements the C++ reader and integrates it with its existing grid.
+
+Upstream LICENSE:
+
+啥是比鸭 4213
+
+    Everyone is free to use, copy, modify, distribute,
+    or do whatever you want with this project.
+
+0. ALL FREE
+1. YOU JUST DO WHAT YOU WANT TO DO

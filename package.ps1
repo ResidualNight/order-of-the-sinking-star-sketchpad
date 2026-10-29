@@ -1,6 +1,6 @@
 ﻿[CmdletBinding()]
 param(
-    [ValidatePattern('^[0-9]+\.[0-9]+\.[0-9]+$')][string]$Version='0.2.2',
+    [ValidatePattern('^[0-9]+\.[0-9]+\.[0-9]+$')][string]$Version='0.2.3',
     [string]$BinaryPath,
     [string]$ToolchainPath,
     [string]$OutputDirectory
@@ -26,6 +26,9 @@ Copy-Item -LiteralPath (Join-Path $root 'assets\OFL-NotoSerifSC.txt') -Destinati
 Copy-Item -LiteralPath (Join-Path $root 'third_party\imgui-1.91.9b\LICENSE.txt') -Destination (Join-Path $stage 'licenses\Dear-ImGui-MIT.txt')
 Copy-Item -LiteralPath (Join-Path $ToolchainPath 'LICENSE.TXT') -Destination (Join-Path $stage 'licenses\LLVM.txt')
 Copy-Item -LiteralPath (Join-Path $root 'LICENSE') -Destination (Join-Path $stage 'licenses\StarSketch-MIT.txt')
+# Keep the owned-file allowlist stable while including the camera reference notice.
+$cameraNotice=Get-Content -LiteralPath (Join-Path $root 'third_party\ootss-cmd-LICENSE.txt') -Raw -Encoding UTF8
+Add-Content -LiteralPath (Join-Path $stage 'licenses\StarSketch-MIT.txt') -Value ("`r`n"+$cameraNotice) -Encoding UTF8
 foreach($name in $noticeNames){Copy-Item -LiteralPath (Join-Path $runtimeNotices $name) -Destination (Join-Path $stage ('licenses\MinGW-'+$name))}
 Copy-Item -LiteralPath (Join-Path $root 'docs\使用说明.md') -Destination (Join-Path $stage '使用说明.txt')
 $archive=Join-Path $OutputDirectory ('StarSketch-'+$Version+'-r67271-test.zip')

@@ -6,7 +6,7 @@ enum class ErrorId {
  None,UnsupportedGameBuild,EntityManagerUnavailable,SettingsArrayUnavailable,SettingsGridInvalid,
  ActorLayerUnavailable,FreshCameraFrameUnavailable,VisibleActorLayerUnavailable,LevelChanged,
  ProjectedGridInvalid,CameraNotFound,CameraOrientationInvalid,CameraChoiceExpired,UnknownGameGrid,ImageGridUnconfirmed,ImageGridUnreliable,
- UnsupportedCaptureFormat,InvalidCalibration,KeyBindingConflict,ConfigReadFailure,ConfigWriteFailure,AuxiliaryCameraOnly,Count
+ UnsupportedCaptureFormat,InvalidCalibration,KeyBindingConflict,ConfigReadFailure,ConfigWriteFailure,AuxiliaryCameraOnly,CameraWorkerUnavailable,CameraPreviewUnconfirmed,ReportFolderUnavailable,ReportClipboardUnavailable,ReportDiagnosticsUnavailable,Count
 };
 struct ErrorInfo {const char* code;const char* diagnostic;const char* message;};
 inline constexpr ErrorInfo Errors[]={
@@ -31,7 +31,12 @@ inline constexpr ErrorInfo Errors[]={
  {"SS-INPUT-001","key_binding_conflict","该按键组合与现有分配冲突，请选择其他组合"},
  {"SS-CONFIG-001","preferences_read_failed","设置文件无法读取或格式无效，暂用默认设置；原文件保留，请检查文件权限或备份后重试"},
  {"SS-CONFIG-002","preferences_write_failed","设置未能保存到磁盘，本次游戏内仍有效；请检查文件权限和剩余空间"},
- {"SS-GRID-013","auxiliary_camera_only","只取得辅助视图，请返回普通游戏视角后重试，或临时选择相机并检查网格贴合"}
+ {"SS-GRID-013","auxiliary_camera_only","只取得辅助视图，请返回普通游戏视角后重试，或临时选择相机并检查网格贴合"},
+ {"SS-GRID-014","camera_worker_unavailable","相机采样任务启动或运行失败，请重新识别或重启游戏后重试"},
+ {"SS-GRID-015","camera_preview_unconfirmed","已显示候选网格，请检查贴合后本次采用；暂不启用吸附与染色"},
+ {"SS-REPORT-001","report_folder_unavailable","无法打开游戏目录，请手动找到沉星之序安装目录中的 StarSketch.log"},
+ {"SS-REPORT-002","report_clipboard_unavailable","无法复制邮箱，请重试，或手动填写 xlwpy@qq.com"},
+ {"SS-REPORT-003","report_diagnostics_unavailable","无法复制诊断信息，请重试，或直接发送 StarSketch.log 并说明分辨率和运行环境"}
 };
 static_assert(sizeof(Errors)/sizeof(Errors[0])==static_cast<unsigned>(ErrorId::Count));
 inline const ErrorInfo& errorInfo(ErrorId id){

@@ -6,6 +6,14 @@ static ImVec2 im(Point p){return{p.x,p.y};}
 static Point pt(ImVec2 p){return{p.x,p.y};}
 static ImU32 faded(uint32_t c,float alpha){return(c&0xffffffu)|(uint32_t(std::clamp(alpha,0.f,1.f)*255)<<24);}
 static constexpr ImU32 Gold=IM_COL32(224,190,109,255),Pale=IM_COL32(245,225,173,255);
+static bool cameraMappingControls(const CameraOption& option,int& aspect,int& fit){
+ bool changed=false;
+ if(option.scenePose)changed=ImGui::Combo("游戏画面比例",&aspect,"跟随窗口\0" "16:9\0" "16:10\0" "4:3\0" "5:4\0" "21:9 (2560x1080)\0" "21:9 (3440x1440)\0" "32:9\0");
+ else if(option.aspectUnverified)ImGui::TextWrapped("内部渲染比例与窗口不同，请检查下方显示方式。");
+ changed=ImGui::Combo("显示方式",&fit,"铺满窗口\0居中黑边\0居中裁剪\0")||changed;
+ ImGui::TextWrapped("按游戏实际画面选择；有黑边时，场景相机先选游戏画面比例。仅本次有效，贴合后再采用。");
+ return changed;
+}
 static void keycap(ImDrawList* dl,ImVec2 a,ImVec2 b,const char* key,bool on=false){
  dl->AddRectFilled({a.x+2,a.y+3},{b.x+2,b.y+3},IM_COL32(0,0,0,95),5);
  dl->AddRectFilled(a,b,on?IM_COL32(73,66,39,250):IM_COL32(22,32,48,250),5);
@@ -29,11 +37,14 @@ bool App::setEditing(bool enabled){
   if(gridPinned&&grid.usable()){gridConfirmed=!levelPaused;status=levelPaused?"等待关卡确认，暂时保留当前网格":"已保留本次采用的网格与吸附";}
   else requestGrid();
  }
- else{finishGesture();cancelGesture();cancelCameraPicker();settingsOpen=false;capturingBinding=-1;captureKey=ImGuiKey_None;}
+ else{finishGesture();cancelGesture();cancelCameraPicker();reportOpen=false;settingsOpen=false;capturingBinding=-1;captureKey=ImGuiKey_None;}
  return true;
 }
 void App::requestGrid(bool resized){
  finishGesture();cancelGesture();cancelCameraPicker(false);
+ gridPreferScene=true;
+ gridRecoveryPending=gridRecoveryScene=false;
+ recoveryOption.reset();recoveryAspect=recoveryFit=0;
  gridConfirmed=gridPinned=false;gridFromGame=false;gridDirectionPending=false;gridRefresh.request(resized);
  status=resized?"画面尺寸已变化，等待稳定后自动定位网格":"正在按游戏数据定位网格";
 }
@@ -48,6 +59,8 @@ void App::resize(float w,float h){
  oldWidth=w;oldHeight=h;
 }
 void App::rejectGameGrid(ErrorId error){
+ gridRecoveryPending=gridRecoveryScene=false;
+ recoveryOption.reset();
  gridRefresh.finish();gridConfirmed=gridPinned=false;gridFromGame=false;gridDirectionPending=false;pickerPreviousPinned=false;pickerPreviousGrid={};
  status=errorMessage(error==ErrorId::None?ErrorId::UnknownGameGrid:error);
 }
@@ -66,13 +79,15 @@ bool App::observeLevel(const LevelIdentity* identity,uint64_t now){
 }
 void App::acceptDetection(const Detection&r){gridRefresh.finish();if(r.grid.usable()&&r.grid.confidence>=.55f){grid=r.grid;gridFromGame=false;gridDirectionPending=false;gridConfirmed=true;status="已识别网格，请检查格子中心；可随时手动调整";}else if(r.grid.usable()&&!gridConfirmed){grid=r.grid;gridFromGame=false;gridDirectionPending=false;gridConfirmed=false;status=errorMessage(ErrorId::ImageGridUnconfirmed);}else{status=errorMessage(ErrorId::ImageGridUnreliable);if(gridConfirmed)status+="；保留当前网格";}}
 void App::acceptGameGrid(const Grid& result,int category,float width,float height,float planeZ){
+ gridRecoveryPending=gridRecoveryScene=false;
+ recoveryOption.reset();
  if(!result.usable()||category<0||category>=int(gridDirections.size())||!std::isfinite(width)||!std::isfinite(height)||width<=0||height<=0){rejectGameGrid(ErrorId::ProjectedGridInvalid);return;}
  finishGesture();cancelGesture();cancelCameraPicker(false);gridRefresh.finish();gridPinned=false;
  gameGridBase=result;gridOutputWidth=width;gridOutputHeight=height;gridDirectionCategory=category;gridPlaneZ=planeZ;gridFromGame=true;
  int saved=gridDirections[category];gridDirection=saved>=0?saved:0;
  grid=result.reflected(width,height,(gridDirection&1)!=0,(gridDirection&2)!=0);
  gridDirectionPending=saved<0;gridConfirmed=!gridDirectionPending;
- if(gridDirectionPending){gridEnabled=true;status="[SS-GRID-011] 相机方向待确认，请在网格精调中调整方向后确认；暂不启用吸附与染色";}
+ if(gridDirectionPending){gridEnabled=true;status="相机方向待确认，请在网格精调中调整方向后确认；暂不启用吸附与染色";}
  else if(category||gridDirection)status="已应用记住的网格方向，可在网格精调中调整";
  else status=gridPlaneOverride?"已按游戏数据定位，使用指定高度层":"已按游戏数据定位，使用当前角色所在高度层";
 }
@@ -88,6 +103,8 @@ void App::confirmGridDirection(){
  status="已确认网格方向，重启游戏后仍记住选择";inputSuppressed=true;
 }
 void App::startCameraPicker(){
+ gridRecoveryPending=gridRecoveryScene=false;
+ recoveryOption.reset();pickerAspect=pickerFit=0;
  if(!cameraPickerOpen){pickerPreviousPinned=gridPinned&&grid.usable();pickerPreviousGrid=pickerPreviousPinned?grid:Grid{};}
  finishGesture();cancelGesture();gridRefresh.cancel();gridConfirmed=gridPinned=false;gridFromGame=false;gridDirectionPending=false;grid.valid=false;gridEnabled=true;
  cameraPickerOpen=true;pickerRefreshRequested=pickerCollecting=true;
@@ -108,7 +125,7 @@ const CameraOption* App::selectedCameraOption()const{
 }
 void App::selectCamera(int index){
  if(index<0||size_t(index)>=cameraOptions.size())return;
- selectedCamera=index;pickerFlip=0;if(!pickerHeightOverride)pickerZ=cameraOptions[size_t(index)].suggestedZ;
+ selectedCamera=index;pickerFlip=0;pickerAspect=pickerFit=0;if(!pickerHeightOverride)pickerZ=cameraOptions[size_t(index)].suggestedZ;
 }
 void App::acceptCameraOptions(const std::vector<CameraOption>& options,float width,float height){
  if(!cameraPickerOpen)return;
@@ -117,9 +134,31 @@ void App::acceptCameraOptions(const std::vector<CameraOption>& options,float wid
  if(cameraOptions.empty()){failCameraPicker(ErrorId::CameraNotFound);return;}
  selectCamera(0);status="切换候选检查网格，贴合后点击本次采用";
 }
+void App::acceptCameraRecoveryOptions(const std::vector<CameraOption>& options,float width,float height){
+ finishGesture();cancelGesture();gridRefresh.finish();
+ for(const auto& option:options){auto preview=cameraOptionGrid(option,width,height,option.suggestedZ,0);if(!preview.usable())continue;
+  grid=preview;gridConfirmed=gridPinned=gridFromGame=gridDirectionPending=false;
+  gridRecoveryPending=true;gridRecoveryScene=option.scenePose;
+  recoveryOption=std::make_unique<CameraOption>(option);recoveryAspect=recoveryFit=0;
+  gridOutputWidth=width;gridOutputHeight=height;
+  status="已找到候选网格，请检查贴合后点击采用候选网格；需要切换相机时使用临时选择相机";return;
+ }
+ rejectGameGrid(ErrorId::ProjectedGridInvalid);
+}
+void App::updateRecoveryMapping(){
+ if(!gridRecoveryPending||!recoveryOption||levelPaused||cameraPickerOpen)return;
+ finishGesture();cancelGesture();
+ grid=cameraOptionGrid(*recoveryOption,gridOutputWidth,gridOutputHeight,recoveryOption->suggestedZ,0,recoveryAspect,CameraFit(recoveryFit));
+ gridConfirmed=gridPinned=false;
+}
+bool App::adoptRecoveryGrid(){
+ if(!gridRecoveryPending||!grid.usable()||levelPaused||cameraPickerOpen)return false;
+ finishGesture();cancelGesture();gridRecoveryPending=false;gridPinned=gridConfirmed=true;gridEnabled=true;recoveryOption.reset();
+ ++cameraPreviewAdoptions;status="已采用候选网格，网格与吸附已保留";inputSuppressed=true;return true;
+}
 Grid App::cameraPickerPreview()const{
  auto option=selectedCameraOption();if(!cameraPickerOpen||!option)return {};
- return cameraOptionGrid(*option,pickerWidth,pickerHeight,pickerHeightOverride?pickerZ:option->suggestedZ,pickerFlip);
+ return cameraOptionGrid(*option,pickerWidth,pickerHeight,pickerHeightOverride?pickerZ:option->suggestedZ,pickerFlip,pickerAspect,CameraFit(pickerFit));
 }
 bool App::adoptCameraPreview(){
  if(!cameraPickerOpen||pickerCollecting)return false;
@@ -137,6 +176,46 @@ void App::failCameraPicker(ErrorId error){
  status=errorMessage(error==ErrorId::None?ErrorId::CameraNotFound:error);
  if(error==ErrorId::CameraNotFound||error==ErrorId::FreshCameraFrameUnavailable||error==ErrorId::CameraOrientationInvalid)
   status=std::string("[")+errorInfo(error).code+"] 未取得可用的新相机候选，请返回普通游戏视角后刷新候选";
+}
+bool App::hasReportableError()const{return status.rfind("[SS-",0)==0||gameBuildWarning!=ErrorId::None||!reportError.empty();}
+void App::openErrorReport(){
+ if(!hasReportableError())return;
+ finishGesture();cancelGesture();
+ if(status.rfind("[SS-",0)==0)reportError=status;
+ else if(reportError.empty()&&gameBuildWarning!=ErrorId::None)reportError=errorMessage(gameBuildWarning);
+ reportOpen=true;inputSuppressed=true;
+}
+void App::checkReportCamera(){reportOpen=false;startCameraPicker();inputSuppressed=true;}
+ReportDiagnostics App::reportDiagnostics()const{
+ auto result=reportContext;result.error=reportError.empty()?status:reportError;result.status=status;
+ result.compatibility=gameBuildWarning==ErrorId::None?"未报告版本兼容警告":errorMessage(gameBuildWarning);
+ result.cameraKey=bindings.label(Action::Calibrate);result.cameraChoices=cameraOptions.size();
+ result.levelPaused=levelPaused;result.gridPinned=gridPinned;result.gridConfirmed=gridConfirmed;
+ if(levelWatch.known&&levelWatch.current.valid())result.level=levelWatch.current.name+" ("+std::to_string(levelWatch.current.columns)+" x "+std::to_string(levelWatch.current.rows)+")";
+ return result;
+}
+void App::reportButton(){if(hasReportableError()&&ImGui::Button("汇报错误"))openErrorReport();}
+void App::errorReportPanel(float w,float h){
+ if(!reportOpen)return;float s=uiScale;
+ ImGui::SetNextWindowPos({w*.5f,h*.5f},ImGuiCond_Always,{.5f,.5f});
+ ImGui::SetNextWindowSize({std::max(1.f,std::min(480*s,w-16*s)),std::max(1.f,std::min(440*s,h-16*s))},ImGuiCond_Always);
+ if(ImGui::Begin("汇报错误",&reportOpen,ImGuiWindowFlags_NoSavedSettings|ImGuiWindowFlags_NoResize|ImGuiWindowFlags_NoCollapse)){
+  ImGui::TextWrapped("请先返回普通游戏视角，再使用临时选择相机，确认是否能检测到相机候选。");
+  ImGui::TextWrapped("默认按键：Shift+G；当前按键：%s",bindings.label(Action::Calibrate).c_str());
+  if(ImGui::Button("先检查相机"))checkReportCamera();
+  ImGui::Separator();
+  ImGui::TextWrapped("若依旧无法检测或网格无法贴合，请将游戏目录中的 StarSketch.log 作为附件发送至：");
+  ImGui::TextUnformatted(FeedbackAddress);
+  ImGui::TextWrapped("可一键复制分辨率、运行环境和报错信息，粘贴到邮件正文，并补充触发操作。日志仍需作为附件发送。");
+  ImGui::BeginDisabled(reportBusy);
+  if(ImGui::Button(reportBusy?"正在处理...":"一键复制诊断信息",{0,30*s})){reportCopyRequested=true;reportFeedback.clear();}
+  if(ImGui::Button("打开游戏目录并复制邮箱",{0,30*s})){reportRequested=true;reportFeedback.clear();}
+  ImGui::EndDisabled();
+  if(!reportFeedback.empty())ImGui::TextWrapped("%s",reportFeedback.c_str());
+  ImGui::Separator();ImGui::TextWrapped("当前错误：%s",reportError.c_str());
+  if(ImGui::Button("关闭")){reportOpen=false;inputSuppressed=true;}
+ }
+ ImGui::End();
 }
 void App::finishGesture(){if(erasing&&eraseChanged)document.record(eraseBefore);erasing=false;eraseChanged=false;if(numbering&&numberChanged)document.record(numberBefore);numbering=false;numberChanged=false;numberConnected=false;numberedCells.clear();}
 void App::restartNumbers(){finishGesture();cancelGesture();document.restartNumbers();status="后续编号从 1 开始，已保留现有编号";inputSuppressed=true;}
@@ -214,7 +293,7 @@ void App::panel(){float s=uiScale;ImGui::SetNextWindowPos({18*s,22*s},ImGuiCond_
  if(gameBuildWarning!=ErrorId::None){
   ImGui::PushTextWrapPos(0);ImGui::TextColored(ImVec4(.60f,.60f,.60f,1),"%s",errorMessage(gameBuildWarning).c_str());ImGui::PopTextWrapPos();
  }
- ImGui::BeginDisabled(settingsOpen);
+ ImGui::BeginDisabled(settingsOpen||reportOpen);
  if(row("pen",bindings.label(Action::Pen).c_str(),"自由画笔",tool==Kind::Stroke)){cancelGesture();tool=Kind::Stroke;}
  if(row("arrow",bindings.label(Action::Arrow).c_str(),"箭头",tool==Kind::Arrow)){cancelGesture();tool=Kind::Arrow;}
  if(row("pin",bindings.label(Action::Pin).c_str(),"星标",tool==Kind::Pin)){cancelGesture();tool=Kind::Pin;}
@@ -222,13 +301,14 @@ void App::panel(){float s=uiScale;ImGui::SetNextWindowPos({18*s,22*s},ImGuiCond_
  if(tool==Kind::Number){ImGui::TextDisabled("下个编号：%d",document.nextNumber);ImGui::TextWrapped("开启吸附后，按住左键滑动快速编号");}
  if(row("restartNumber",bindings.label(Action::RestartNumber).c_str(),"编号从 1 开始"))restartNumbers();
  row("eraser",bindings.label(Action::Erase).c_str(),"按住擦除");
- if(row("grid",bindings.label(Action::Grid).c_str(),"网格与吸附",gridEnabled)){gridEnabled=!gridEnabled;if(gridEnabled&&!gridConfirmed&&!gridDirectionPending&&!cameraPickerOpen&&!levelPaused)requestGrid();}
- if(row("tint",bindings.label(Action::Tint).c_str(),"棋盘染色",tint)){tint=!tint;if(tint&&!gridConfirmed&&!gridDirectionPending&&!cameraPickerOpen&&!levelPaused)requestGrid();}
+ if(row("grid",bindings.label(Action::Grid).c_str(),"网格与吸附",gridEnabled)){gridEnabled=!gridEnabled;if(gridEnabled&&!gridConfirmed&&!gridRecoveryPending&&!gridDirectionPending&&!cameraPickerOpen&&!levelPaused)requestGrid();}
+ if(row("tint",bindings.label(Action::Tint).c_str(),"棋盘染色",tint)){tint=!tint;if(tint&&!gridConfirmed&&!gridRecoveryPending&&!gridDirectionPending&&!cameraPickerOpen&&!levelPaused)requestGrid();}
  if(row("cameraPicker",bindings.label(Action::Calibrate).c_str(),"临时选择相机",cameraPickerOpen))startCameraPicker();
  if(ImGui::Button("重新识别",{137*s,29*s})){requestGrid();gridEnabled=true;}ImGui::SameLine();if(ImGui::Button(("退出绘画  "+bindings.label(Action::Toggle)).c_str(),{137*s,29*s}))wantExit=true;
- if(grid.usable()&&!gridConfirmed&&!gridDirectionPending&&!cameraPickerOpen&&!levelPaused){if(ImGui::Button("采用候选网格",{0,29*s})){gridRefresh.cancel();gridConfirmed=true;status="已采用候选网格，可继续精调";}}
+ if(gridEnabled&&grid.usable()&&!gridConfirmed&&!gridDirectionPending&&!cameraPickerOpen&&!levelPaused){if(ImGui::Button("采用候选网格",{0,29*s})){if(gridRecoveryPending)adoptRecoveryGrid();else {gridRefresh.cancel();gridConfirmed=true;status="已采用候选网格，可继续精调";}}}
  if(gridEnabled&&!cameraPickerOpen){if(gridDirectionPending)ImGui::SetNextItemOpen(true,ImGuiCond_Always);
  if(ImGui::CollapsingHeader("网格精调")){ImGui::PushItemWidth(145*s);
+ if(gridRecoveryPending&&recoveryOption){ImGui::BeginDisabled(levelPaused);if(cameraMappingControls(*recoveryOption,recoveryAspect,recoveryFit))updateRecoveryMapping();ImGui::EndDisabled();}
  if(gridFromGame&&grid.usable()){
   ImGui::TextWrapped(gridDirectionPending?"请调整方向并确认；确认前仅显示预览":"方向选择会自动保存，仅影响网格");
   bool horizontal=(gridDirection&1)!=0,vertical=(gridDirection&2)!=0;
@@ -237,7 +317,7 @@ void App::panel(){float s=uiScale;ImGui::SetNextWindowPos({18*s,22*s},ImGuiCond_
   if(ImGui::Button("恢复原始方向"))adjustGridDirection(0);
   if(gridDirectionPending){ImGui::SameLine();if(ImGui::Button("确认并记住"))confirmGridDirection();}
  }
- ImGui::BeginDisabled(!grid.usable()||gridDirectionPending||cameraPickerOpen||levelPaused);
+ ImGui::BeginDisabled(!grid.usable()||gridRecoveryPending||gridDirectionPending||cameraPickerOpen||levelPaused);
  if(gridFromGame){if(ImGui::DragFloat("高度层",&gridPlaneZ,.05f,-1000,1000,"%.2f")){gridPlaneOverride=true;requestGrid();}if(ImGui::Button("使用角色所在层")){gridPlaneOverride=false;requestGrid();}}
  bool changed=ImGui::DragFloat2("基点",&grid.origin.x,.5f,0,0,"%.1f");changed=ImGui::DragFloat2("横向步长",&grid.u.x,.2f,0,0,"%.1f")||changed;changed=ImGui::DragFloat2("纵向步长",&grid.v.x,.2f,0,0,"%.1f")||changed;if(std::abs(grid.px)+std::abs(grid.py)>.00001f)changed=ImGui::DragFloat2("透视参数",&grid.px,.00001f,-.2f,.2f,"%.5f")||changed;if(changed){gridFromGame=false;gridRefresh.cancel();gridConfirmed=grid.usable();}
  ImGui::PopItemWidth();if(ImGui::Button("格距 ×2")){grid.scaleStep(2);gridFromGame=false;gridRefresh.cancel();gridConfirmed=grid.usable();}ImGui::SameLine();if(ImGui::Button("格距 ÷2")){if(length(grid.u)>16&&length(grid.v)>16){grid.scaleStep(.5f);gridFromGame=false;gridRefresh.cancel();gridConfirmed=grid.usable();}}ImGui::EndDisabled();}}
@@ -247,29 +327,33 @@ void App::panel(){float s=uiScale;ImGui::SetNextWindowPos({18*s,22*s},ImGuiCond_
 
  ImGui::Separator();if(ImGui::Button("键位与设置",{0,29*s})){finishGesture();cancelGesture();settingsOpen=true;capturingBinding=-1;bindingStatus.clear();}
  ImGui::TextWrapped("%s 清空 · %s 撤销 · %s 重做",bindings.label(Action::Clear).c_str(),bindings.label(Action::Undo).c_str(),bindings.label(Action::Redo).c_str());ImGui::TextDisabled("Esc 取消 / 返回游戏");if(!status.empty()){ImGui::PushTextWrapPos(0);ImGui::TextColored(ImVec4(.76f,.80f,.78f,1),"%s",status.c_str());ImGui::PopTextWrapPos();}
- ImGui::EndDisabled();
+ reportButton();ImGui::EndDisabled();
  ImGui::End();ImGui::PopStyleVar(2);
 }
 void App::cameraPickerPanel(float w,float h){
  if(!cameraPickerOpen)return;float s=uiScale,width=std::max(1.f,std::min(354*s,w-16*s));
  if(pickerPlaceFrames>0){ImGui::SetNextWindowPos({std::clamp(panelMax.x+8*s,8*s,std::max(8*s,w-width-8*s)),std::clamp(panelMin.y,8*s,std::max(8*s,h-400*s))},ImGuiCond_Always);--pickerPlaceFrames;}
  ImGui::SetNextWindowSize({width,0},ImGuiCond_Always);ImGui::SetNextWindowSizeConstraints({width,0},{width,std::max(1.f,h-16*s)});
- bool open=true;
+ bool open=true,originalRequested=false;
  if(ImGui::Begin("临时选择相机",&open,ImGuiWindowFlags_NoSavedSettings|ImGuiWindowFlags_NoResize|ImGuiWindowFlags_NoCollapse|ImGuiWindowFlags_AlwaysAutoResize)){
+  ImGui::BeginDisabled(reportOpen);
   ImGui::TextWrapped("切换候选预览网格，可翻转或调整高度；贴合后本次采用，不保存相机身份。");
   if(pickerCollecting)ImGui::TextUnformatted("正在采集，请保持当前视角...");
   else if(cameraOptions.empty())ImGui::TextWrapped("没有可用候选，请返回普通游戏视角后刷新候选。");
   else ImGui::Text("候选 %d / %zu",selectedCamera+1,cameraOptions.size());
-  ImGui::BeginDisabled(pickerCollecting||settingsOpen);
+  ImGui::BeginDisabled(pickerCollecting||settingsOpen||reportOpen);
   if(!cameraOptions.empty()){
    if(ImGui::BeginChild("##cameraChoices",{0,132*s},ImGuiChildFlags_Borders)){
-    for(size_t i=0;i<cameraOptions.size();++i){char label[100];std::snprintf(label,sizeof(label),"候选 %zu%s",i+1,auxiliaryCamera(cameraOptions[i].camera.sourceType())?"（辅助视图）":cameraOptions[i].directionCategory?"（方向异常）":"");
+    for(size_t i=0;i<cameraOptions.size();++i){char label[100];std::snprintf(label,sizeof(label),"候选 %zu%s",i+1,cameraOptions[i].scenePose?"（场景相机·试用）":auxiliaryCamera(cameraOptions[i].camera.sourceType())?"（辅助视图）":cameraOptions[i].projectionUnverified?"（待确认）":cameraOptions[i].directionCategory?"（方向异常）":"（原方案）");
      if(ImGui::Selectable(label,selectedCamera==int(i)))selectCamera(int(i));
     }
    }ImGui::EndChild();
+   if(auto option=selectedCameraOption();option&&option->scenePose)ImGui::TextWrapped("场景相机为试用来源，请在普通游戏视角检查网格贴合后采用；地图或过场画面请返回后刷新候选。");
    if(auto option=selectedCameraOption();option&&auxiliaryCamera(option->camera.sourceType()))ImGui::TextWrapped("辅助视图可能与画面不一致，请检查翻转和高度后再采用。");
+   if(auto option=selectedCameraOption();option&&option->projectionUnverified)ImGui::TextWrapped("此候选未通过完整自动校验，请检查网格贴合后再采用。");
    if(ImGui::Button("上一项"))selectCamera((selectedCamera+int(cameraOptions.size())-1)%int(cameraOptions.size()));
    ImGui::SameLine();if(ImGui::Button("下一项"))selectCamera((selectedCamera+1)%int(cameraOptions.size()));
+   if(auto option=selectedCameraOption()){ImGui::PushItemWidth(150*s);cameraMappingControls(*option,pickerAspect,pickerFit);ImGui::PopItemWidth();}
    bool horizontal=(pickerFlip&1)!=0,vertical=(pickerFlip&2)!=0;
    ImGui::Checkbox("左右翻转",&horizontal);ImGui::SameLine();ImGui::Checkbox("上下翻转",&vertical);pickerFlip=(horizontal?1:0)|(vertical?2:0);
    ImGui::Checkbox("指定高度层",&pickerHeightOverride);
@@ -277,17 +361,22 @@ void App::cameraPickerPanel(float w,float h){
    else if(auto option=selectedCameraOption())ImGui::Text("%s：%.2f",option->actorLayer?"角色高度层":"默认高度（请检查）",option->suggestedZ);
   }
   ImGui::EndDisabled();
-  ImGui::BeginDisabled(pickerCollecting||settingsOpen||!cameraPickerPreview().usable());
+  ImGui::BeginDisabled(pickerCollecting||settingsOpen||reportOpen||!cameraPickerPreview().usable());
   bool apply=ImGui::Button("本次采用");ImGui::EndDisabled();
   ImGui::SameLine();if(ImGui::Button("刷新候选"))startCameraPicker();
   ImGui::SameLine();if(ImGui::Button("取消"))open=false;
+  ImGui::BeginDisabled(pickerCollecting||settingsOpen||reportOpen);
+  if(ImGui::Button("使用原方案"))originalRequested=true;
+  ImGui::EndDisabled();
   if(!status.empty())ImGui::TextWrapped("%s",status.c_str());
+  ImGui::BeginDisabled(settingsOpen||reportOpen);reportButton();ImGui::EndDisabled();
   if(apply)adoptCameraPreview();
+  ImGui::EndDisabled();
  }
- ImGui::End();if(!open)cancelCameraPicker();
+ ImGui::End();if(originalRequested)requestOriginalGrid();else if(!open)cancelCameraPicker();
 }
 void App::canvas(float w,float h){auto dl=ImGui::GetBackgroundDrawList();if(cameraPickerOpen){auto preview=cameraPickerPreview();drawGrid(dl,w,h,&preview);}else drawGrid(dl,w,h);for(auto&m:document.marks)drawMark(dl,m);
- if(!editing||settingsOpen||inputSuppressed)return;auto&io=ImGui::GetIO();Point mouse=pt(io.MousePos);
+ if(!editing||settingsOpen||reportOpen||inputSuppressed)return;auto&io=ImGui::GetIO();Point mouse=pt(io.MousePos);
  // ImGui drops HoveredWindow during a drag that began on the external canvas.
  bool overPanel=mouse.x>=panelMin.x&&mouse.y>=panelMin.y&&mouse.x<panelMax.x&&mouse.y<panelMax.y;
  bool overUI=overPanel||ImGui::IsWindowHovered(ImGuiHoveredFlags_AnyWindow)||ImGui::IsAnyItemActive();bool inside=mouse.x>=0&&mouse.y>=0&&mouse.x<w&&mouse.y<h;bool eraseHeld=bindings.active(Action::Erase,true);
@@ -341,6 +430,11 @@ void App::settingsPanel(){
 }
 void App::shortcuts(){
  auto&io=ImGui::GetIO();
+ if(reportOpen){
+  if(ImGui::IsKeyPressed(ImGuiKey_Escape,false)){reportOpen=false;inputSuppressed=true;}
+  else if(bindings.active(Action::Calibrate))checkReportCamera();
+  return;
+ }
  if(settingsOpen){
   if(io.WantTextInput||ImGui::IsAnyItemActive()||ImGui::IsPopupOpen(nullptr,ImGuiPopupFlags_AnyPopupId)){capturingBinding=-1;captureKey=ImGuiKey_None;return;}
   if(ImGui::IsKeyPressed(ImGuiKey_Escape,false)){if(capturingBinding>=0){capturingBinding=-1;captureKey=ImGuiKey_None;bindingStatus="已取消改键";}else settingsOpen=false;inputSuppressed=true;return;}
@@ -367,8 +461,8 @@ void App::shortcuts(){
  if(!editing)return;
  if(bindings.active(Action::RestartNumber)){restartNumbers();return;}
  for(auto choice:{std::pair<Action,Kind>{Action::Pen,Kind::Stroke},{Action::Arrow,Kind::Arrow},{Action::Pin,Kind::Pin},{Action::Number,Kind::Number}})if(bindings.active(choice.first)){finishGesture();cancelGesture();tool=choice.second;}
- if(bindings.active(Action::Grid)){gridEnabled=!gridEnabled;if(gridEnabled&&!gridConfirmed&&!gridDirectionPending&&!cameraPickerOpen&&!levelPaused)requestGrid();}
- if(bindings.active(Action::Tint)){tint=!tint;if(tint&&!gridConfirmed&&!gridDirectionPending&&!cameraPickerOpen&&!levelPaused)requestGrid();}
+ if(bindings.active(Action::Grid)){gridEnabled=!gridEnabled;if(gridEnabled&&!gridConfirmed&&!gridRecoveryPending&&!gridDirectionPending&&!cameraPickerOpen&&!levelPaused)requestGrid();}
+ if(bindings.active(Action::Tint)){tint=!tint;if(tint&&!gridConfirmed&&!gridRecoveryPending&&!gridDirectionPending&&!cameraPickerOpen&&!levelPaused)requestGrid();}
  if(bindings.active(Action::Calibrate))startCameraPicker();
  if(bindings.active(Action::Clear)){finishGesture();cancelGesture();document.clear();}
  if(bindings.active(Action::Undo)){finishGesture();cancelGesture();document.undo();}
@@ -379,7 +473,7 @@ void App::frame(float w,float h){
  if(!std::isfinite(w)||!std::isfinite(h)||w<=0||h<=0){finishGesture();cancelGesture();inputSuppressed=true;return;}
  resize(w,h);uiScale=std::clamp(h/1080.f,.75f,2.4f);ImGui::GetIO().FontGlobalScale=19.f/32.f*uiScale;
  bindings.update();shortcuts();
- if(editing){panel();cameraPickerPanel(w,h);settingsPanel();}
+ if(editing){panel();cameraPickerPanel(w,h);settingsPanel();errorReportPanel(w,h);}
  else{float s=uiScale;auto dl=ImGui::GetForegroundDrawList();auto label=bindings.label(Action::Toggle);float width=std::max(37.f*s,ImGui::CalcTextSize(label.c_str()).x+14*s);keycap(dl,{20*s,h-51*s},{20*s+width,h-18*s},label.c_str());dl->AddText({31*s+width,h-43*s},IM_COL32(238,215,154,205),"草稿纸");}
  canvas(w,h);
 }

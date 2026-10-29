@@ -26,6 +26,7 @@
 !/assets/OFL-NotoSerifSC.txt
 !/third_party/
 !/third_party/README.md
+!/third_party/ootss-cmd-LICENSE.txt
 !/third_party/imgui-1.91.9b/
 !/third_party/imgui-1.91.9b/*.h
 !/third_party/imgui-1.91.9b/imgui.cpp
