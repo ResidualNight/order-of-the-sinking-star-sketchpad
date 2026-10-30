@@ -178,6 +178,7 @@ public:
       log("Game grid: %s direction_choice=%d direction_confirmed=%d",gameGrid.diagnostic.c_str(),app.gridDirection,app.gridConfirmed?1:0);
      }else if(state==sketch::GameGridState::Preview){
       app.acceptCameraRecoveryOptions(gameGrid.pickerOptions(),float(desc.Width),float(desc.Height));
+      if(app.gridPinned)log("Camera recovery automatically adopted: request=%llu pinned=1 snapping=%d source=%s",static_cast<unsigned long long>(gameGrid.requestId()),app.snappingReady()?1:0,app.gridRecoveryScene?"scene_pose":"stack");
       log("Camera preview available: request=%llu choices=%zu %s",static_cast<unsigned long long>(gameGrid.requestId()),gameGrid.pickerOptions().size(),gameGrid.diagnostic.c_str());
       for(const auto& detail:gameGrid.failureDetails())log("Camera preview request=%llu %s",static_cast<unsigned long long>(gameGrid.requestId()),detail.c_str());
      }else if(state==sketch::GameGridState::Unavailable){
@@ -188,7 +189,7 @@ public:
    }
    bool settingsWereOpen=app.settingsOpen;int previousDirection=app.gridDirection;bool directionWasConfirmed=app.gridConfirmed;
    auto previousAdoptions=app.cameraPreviewAdoptions;int selectedCamera=app.selectedCamera;
-   bool selectedSceneCamera=app.gridRecoveryPending?app.gridRecoveryScene:(app.selectedCameraOption()&&app.selectedCameraOption()->scenePose);
+   bool selectedSceneCamera=app.selectedCameraOption()&&app.selectedCameraOption()->scenePose;
    sketch::FeedbackResult reportResult;
    if(feedback.takeResult(reportResult)){
     app.reportFeedback=sketch::feedbackResultMessage(reportResult);

@@ -26,7 +26,7 @@ struct Fixture {
  uintptr_t base()const{return reinterpret_cast<uintptr_t>(image.data());}
  uintptr_t root()const{return reinterpret_cast<uintptr_t>(manager.data());}
  SceneCameraPose pose=fixturePose();
- Fixture(){
+ Fixture(bool updated=false){
   IMAGE_DOS_HEADER dos{};dos.e_magic=IMAGE_DOS_SIGNATURE;dos.e_lfanew=0x80;put(image,0,dos);
   IMAGE_NT_HEADERS64 nt{};nt.Signature=IMAGE_NT_SIGNATURE;nt.FileHeader.Machine=IMAGE_FILE_MACHINE_AMD64;nt.FileHeader.NumberOfSections=2;
   nt.FileHeader.SizeOfOptionalHeader=sizeof(IMAGE_OPTIONAL_HEADER64);nt.OptionalHeader.Magic=IMAGE_NT_OPTIONAL_HDR64_MAGIC;nt.OptionalHeader.SizeOfImage=DWORD(image.size());put(image,0x80,nt);
@@ -57,6 +57,15 @@ struct Fixture {
   put(manager,0xdd0,Array{1,base()+0xb00400,1});put(image,0xb00400,base()+0xb01000);put(image,0xb01000+240,root());put(image,0xb01000+256,uint32_t(8));
   put(image,0xb01000+264,base()+0xb00500);put(image,0xb00500,Type{7,0,1320,8,base()+0xb00600});std::memcpy(image.data()+0xb00600,"Settings",8);
   put(image,0xb01000+816,Geometry{8,7,56,0,{},{}});put(image,0xb01000+1296,int64_t(7));put(image,0xb01000+1304,base()+0xb00700);std::memcpy(image.data()+0xb00700,"fixture",7);
+  if(updated){
+   pattern(image,Gate,{0x49,0x8d,0xac,0x24,0x98,0x3d,0,0,0x48,0x8b,0x05,0,0,0,0,0x48,0x85,0xc0,0x0f,0x84,0,0,0,0,0x48,0x83,0xf8,1,0x0f,0x85,0,0,0,0});
+   put(image,Gate+11,int32_t(Mode-Gate-15));put(image,Gate+20,int32_t(Normal-Gate-24));put(image,Gate+30,int32_t(Frozen-Gate-34));
+   pattern(image,Normal,{0x4c,0x89,0x74,0x24,0,0x49,0x83,0xbc,0x24,0x38,5,0,0,0,0x0f,0x8e,0,0,0,0});
+   put(image,Normal+60,uint32_t(0x538));image[Normal+69]=0xcc;
+   pattern(image,Normal+70,{0x49,0x8b,0x84,0x24,0x40,5,0,0,0x4a,0x8b,0x1c,0xf8});
+   pattern(image,Frozen-19,{0x41,0x0f,0x13,0x84,0x24,0x98,0x3d,0,0,0xf3,0x41,0x0f,0x11,0x94,0x24,0xa0,0x3d,0,0,0x49,0x8b,0x04,0x24,0x48,0x83,0xc0,0xfb,0x48,0x83,0xf8,0x14,0x0f,0x87,0,0,0,0});
+   put(image,Link+3,int32_t(0xb68618-Link-7));put(image,0xb69600,uintptr_t(0));put(image,0xb68618,root());
+  }
  }
 };
 void verifyFile(const char* filename){
@@ -65,13 +74,14 @@ void verifyFile(const char* filename){
  auto nt=reinterpret_cast<const IMAGE_NT_HEADERS64*>(bytes.data()+dos->e_lfanew);assert(nt->OptionalHeader.SizeOfImage<0x10000000);
  std::vector<unsigned char> mapped(nt->OptionalHeader.SizeOfImage);std::memcpy(mapped.data(),bytes.data(),nt->OptionalHeader.SizeOfHeaders);
  auto sections=IMAGE_FIRST_SECTION(nt);for(unsigned i=0;i<nt->FileHeader.NumberOfSections;++i){const auto& s=sections[i];assert(size_t(s.PointerToRawData)+s.SizeOfRawData<=bytes.size()&&size_t(s.VirtualAddress)+s.SizeOfRawData<=mapped.size());std::memcpy(mapped.data()+s.VirtualAddress,bytes.data()+s.PointerToRawData,s.SizeOfRawData);}
- SceneCameraReader reader;assert(reader.discover(readMemory,reinterpret_cast<uintptr_t>(mapped.data())));
+ SceneCameraReader reader;auto base=reinterpret_cast<uintptr_t>(mapped.data());
+ assert(reader.discover(readMemory,base)||reader.discover(readMemory,base,0xb68618));
  assert(reader.discovered().position==0x3d98&&reader.discovered().orientation==0x3db0&&reader.discovered().projection==0x3dc0);
  std::cout<<"PASS: real game PE signature/field cross-check (offline data only)\n";
 }
 }
-void checkSceneCameraReaderFixture(uintptr_t image,CameraFrame* raw,const SceneCameraPose& pose);
-void checkSceneCameraWorker(uintptr_t image,CameraFrame* raw);
+void checkSceneCameraReaderFixture(uintptr_t image,CameraFrame* raw,const SceneCameraPose& pose,uintptr_t managerRva=0xb69600);
+void checkSceneCameraWorker(uintptr_t image,CameraFrame* raw,uintptr_t managerRva=0xb69600);
 void checkSceneCamera(const char* filename){
  auto pose=fixturePose();assert(pose.valid());auto camera=gameCameraFixture();
  // Compare every screen mapping against independent viewport arithmetic.
@@ -139,6 +149,13 @@ void checkSceneCamera(const char* filename){
  assert(reader.discover(readMemory,f->base()));
  camera=gameCameraFixture();checkSceneCameraReaderFixture(f->base(),&camera,pose);
  camera=gameCameraFixture();checkSceneCameraWorker(f->base(),&camera);
+ auto updated=std::make_unique<Fixture>(true);
+ assert(!reader.discover(readMemory,updated->base())); // Old slot must not match the new code.
+ assert(reader.discover(readMemory,updated->base(),0xb68618)&&reader.sample(readMemory,updated->root(),result));
+ for(const auto& e:reader.discovered().evidence)for(size_t i=0;i<e.bytes.size();++i){auto at=e.address-updated->base()+i;updated->image[at]^=1;assert(!reader.sample(readMemory,updated->root(),result));updated->image[at]^=1;}
+ std::memcpy(updated->image.data()+0x1a00,updated->image.data()+Fixture::Gate,34);assert(!reader.discover(readMemory,updated->base(),0xb68618));std::fill(updated->image.begin()+0x1a00,updated->image.begin()+0x1a22,0xcc);
+ camera=gameCameraFixture();checkSceneCameraReaderFixture(updated->base(),&camera,pose,0xb68618);
+ camera=gameCameraFixture();checkSceneCameraWorker(updated->base(),&camera,0xb68618);
  verifyFile(filename);
  std::cout<<"PASS: scene pose projection vs captured matrix, source/map guards, six code proofs, layout ambiguity/conflicts and original fallback\n";
 }

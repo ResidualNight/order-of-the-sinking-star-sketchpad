@@ -17,14 +17,14 @@ inline bool operator!=(const LevelIdentity&a,const LevelIdentity&b){return !(a==
 // These r67271 offsets are attempted on unverified builds as well. The caller
 // reports the fingerprint mismatch; all runtime layout/stability checks apply.
 // The injected reader also lets tests exercise the exact runtime validation without game data.
-template<class Read> bool readValidatedLevel(Read read,uintptr_t image,LevelIdentity& output){
+template<class Read> bool readValidatedLevel(Read read,uintptr_t image,LevelIdentity& output,uintptr_t managerRva=0xb69600){
  auto get=[&](uintptr_t address,auto& value){return address>0x10000&&read(address,&value,sizeof(value));};
  struct Array{int64_t count;uintptr_t data;int64_t capacity;};
  struct Type{uint32_t tag,pad;int64_t size,count;uintptr_t data;};
  struct Geometry{int64_t x,y,count;uint8_t wrapping,pad[3];int32_t corner[3];};
  struct Text{int64_t count;uintptr_t data;};
  static_assert(sizeof(Array)==24&&sizeof(Type)==32&&sizeof(Geometry)==40&&sizeof(Text)==16);
- uintptr_t manager=0;if(!get(image+0xb69600,manager)||manager<=0x10000)return false;
+ uintptr_t manager=0;if(!get(image+managerRva,manager)||manager<=0x10000)return false;
  Array array{};if(!get(manager+0xdd0,array)||array.count<1||array.count>4||array.capacity<array.count||array.capacity>100000||array.data<=0x10000)return false;
  std::array<uintptr_t,4> settings{};if(!read(array.data,settings.data(),size_t(array.count)*sizeof(uintptr_t)))return false;
  for(int64_t i=0;i<array.count;++i){
@@ -37,7 +37,7 @@ template<class Read> bool readValidatedLevel(Read read,uintptr_t image,LevelIden
   for(unsigned char c:value)if(!((c>='a'&&c<='z')||(c>='A'&&c<='Z')||(c>='0'&&c<='9')||c=='_'||c=='-'||c=='.'||c=='/'))return false;
   // Reject mixed snapshots while loading, including manager reuse and an in-place Settings edit.
   uintptr_t endManager=0,endEntity=0,endOwner=0,endType=0;Array endArray{};Geometry endGrid{};Text endName{};uint32_t endId=0;uint8_t endDestroyed=1;
-  if(!get(image+0xb69600,endManager)||endManager!=manager||!get(manager+0xdd0,endArray)||endArray.count!=array.count||endArray.data!=array.data||endArray.capacity!=array.capacity||!get(array.data+size_t(i)*sizeof(uintptr_t),endEntity)||endEntity!=entity||!get(entity+240,endOwner)||endOwner!=owner||!get(entity+264,endType)||endType!=type||!get(entity+256,endId)||endId!=id||!get(entity+280,endDestroyed)||endDestroyed||!get(entity+816,endGrid)||std::memcmp(&grid,&endGrid,sizeof(grid))||!get(entity+1296,endName)||endName.count!=name.count||endName.data!=name.data)return false;
+  if(!get(image+managerRva,endManager)||endManager!=manager||!get(manager+0xdd0,endArray)||endArray.count!=array.count||endArray.data!=array.data||endArray.capacity!=array.capacity||!get(array.data+size_t(i)*sizeof(uintptr_t),endEntity)||endEntity!=entity||!get(entity+240,endOwner)||endOwner!=owner||!get(entity+264,endType)||endType!=type||!get(entity+256,endId)||endId!=id||!get(entity+280,endDestroyed)||endDestroyed||!get(entity+816,endGrid)||std::memcmp(&grid,&endGrid,sizeof(grid))||!get(entity+1296,endName)||endName.count!=name.count||endName.data!=name.data)return false;
   std::string again(value.size(),'\0');if(!read(name.data,again.data(),again.size())||again!=value)return false;
   output={id,int(grid.x),int(grid.y),{grid.corner[0],grid.corner[1],grid.corner[2]},std::move(value)};return true;
  }

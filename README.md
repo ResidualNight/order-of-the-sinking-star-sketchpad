@@ -8,20 +8,20 @@ An in-game sketchpad for **[Order of the Sinking Star](https://store.steampowere
 
 在游戏画面上自由画线、画箭头、放置星标和连续编号，并用半透明棋盘辅助观察。网格直接读取游戏数据和相机透视，支持临时选择相机。独立制作，非游戏官方组件。
 
-**当前版本：0.2.3 测试版。** 增加独立场景相机来源，原方案继续备用，两种方法都无可用网格才报定位错误。支持常见 4:3、5:4、16:9、16:10、21:9、32:9 的候选预览，以及铺满、居中黑边和居中裁剪映射。开启网格不自动弹出选择窗口，检查主画布预览后点击“采用候选网格”；Shift+G 仍主动打开列表。新增错误反馈与诊断复制。用户已安装测试并反馈正常，更多电脑和关卡仍需实测。见 [0.2.3 发布说明](https://github.com/ResidualNight/order-of-the-sinking-star-sketchpad/releases/tag/v0.2.3-test)。
+**当前版本：0.2.4 测试版。** 适配 2026-10-30 的 Steam build 26249670，保留旧 r67271 支持。找到可用候选网格后自动采用并开启吸附，无需重复点击；棋盘染色按 T 开关生效。保留临时相机选择和常见屏幕比例映射，修复重新识别后旧网格可能被再次采用、取消选择后比例入口丢失等问题。用户已测试对应功能构建并反馈正常，更多电脑和关卡仍需实测。见 [0.2.4 发布说明](https://github.com/ResidualNight/order-of-the-sinking-star-sketchpad/releases/tag/v0.2.4-test)。
 
 ## 下载与安装
 
-**推荐使用可视化安装包。** 两种 ZIP 内的游戏功能与 DLL 完全相同，均为 0.2.3 测试版，无需安装开发环境。请从 [0.2.3 Release](https://github.com/ResidualNight/order-of-the-sinking-star-sketchpad/releases/tag/v0.2.3-test) 的 **Assets** 下载下面的玩家 ZIP；GitHub 自动生成的 **Source code** 是开发源码，不是安装包。
+**推荐使用可视化安装包。** 两种 ZIP 内的游戏功能与 DLL 完全相同，均为 0.2.4 测试版，无需安装开发环境。请从 [0.2.4 Release](https://github.com/ResidualNight/order-of-the-sinking-star-sketchpad/releases/tag/v0.2.4-test) 的 **Assets** 下载下面的玩家 ZIP；GitHub 自动生成的 **Source code** 是开发源码，不是安装包。
 
 | 方式 | 下载文件 | 适合的操作 |
 | --- | --- | --- |
-| 可视化安装 / 更新 / 卸载（推荐） | [StarSketch-0.2.3-installer.zip](https://github.com/ResidualNight/order-of-the-sinking-star-sketchpad/releases/download/v0.2.3-test/StarSketch-0.2.3-installer.zip) | 选择游戏文件夹，安装、检查插件更新或卸载 |
-| 直接复制文件与文件夹 | [StarSketch-0.2.3-r67271-test.zip](https://github.com/ResidualNight/order-of-the-sinking-star-sketchpad/releases/download/v0.2.3-test/StarSketch-0.2.3-r67271-test.zip) | 自己将 DLL 和资源文件夹复制到游戏目录 |
+| 可视化安装 / 更新 / 卸载（推荐） | [StarSketch-0.2.4-installer.zip](https://github.com/ResidualNight/order-of-the-sinking-star-sketchpad/releases/download/v0.2.4-test/StarSketch-0.2.4-installer.zip) | 选择游戏文件夹，安装、检查插件更新或卸载 |
+| 直接复制文件与文件夹 | [StarSketch-0.2.4-r67271-test.zip](https://github.com/ResidualNight/order-of-the-sinking-star-sketchpad/releases/download/v0.2.4-test/StarSketch-0.2.4-r67271-test.zip) | 自己将 DLL 和资源文件夹复制到游戏目录 |
 
 ### 方式一：可视化安装 / 卸载
 
-1. 保存进度并退出游戏，将 `StarSketch-0.2.3-installer.zip` **完整解压到一个单独文件夹**，不要在压缩包里直接打开 EXE，也不要只提取 EXE。
+1. 保存进度并退出游戏，将 `StarSketch-0.2.4-installer.zip` **完整解压到一个单独文件夹**，不要在压缩包里直接打开 EXE，也不要只提取 EXE。
 2. 双击 `StarSketch-安装卸载.exe`，也可使用同目录的 `StarSketch-安装卸载.cmd`。
 3. 浏览选择或粘贴游戏安装文件夹，里面应直接包含 `sinking_star.exe`。可在 Steam 库中右键游戏 → 管理 → 浏览本地文件找到它。
 4. 点击“检查目录”，确认选对游戏目录后点击“安装 / 更新”，等待安装成功提示。
@@ -37,7 +37,7 @@ An in-game sketchpad for **[Order of the Sinking Star](https://store.steampowere
 
 ### 方式二：直接复制文件与文件夹（继续保留）
 
-1. 保存进度并退出游戏，解压 `StarSketch-0.2.3-r67271-test.zip`。
+1. 保存进度并退出游戏，解压 `StarSketch-0.2.4-r67271-test.zip`。
 2. 将包内的 **`dxgi.dll` 和整个 `StarSketch-assets/` 文件夹**复制到 `sinking_star.exe` 同级目录；不要在中间多套一层解压文件夹。
 3. 保留包内的使用说明和 `licenses/`，照常从 Steam 启动游戏，按 **E** 打开草稿纸。
 
@@ -57,9 +57,9 @@ An in-game sketchpad for **[Order of the Sinking Star](https://store.steampowere
 
 ## 操作
 
-内部渲染比例与窗口不同的候选仍需确认。待确认时在“网格精调”选择显示方式；场景相机可指定实际游戏画面比例，原方案使用读取到的内部比例。例如 2560×1600 窗口中的 2560×1440 居中画面，选择 16:9 +“居中黑边”。不自动识别黑边，贴合后采用；映射和网格只在本次会话保留。
+找到可用候选网格后自动开启吸附。在“网格精调”选择显示方式；场景相机可指定实际游戏画面比例，原方案使用读取到的内部比例。例如 2560×1600 窗口中的 2560×1440 居中画面，选择 16:9 +“居中黑边”。不自动识别黑边，主画布映射调整立即生效。切换比例或显示方式会重置下方精调，请先选显示方式再调格距；映射和网格只在本次会话保留。
 
-以下为 0.2.3 的默认键位；旧版编号星标现拆分为 P 星标和 N 编号。除进入/退出外，工具快捷键只在绘画模式下生效。
+以下为 0.2.4 的默认键位；旧版编号星标现拆分为 P 星标和 N 编号。除进入/退出外，工具快捷键只在绘画模式下生效。
 
 | 按键 | 功能 |
 | --- | --- |
@@ -87,7 +87,7 @@ An in-game sketchpad for **[Order of the Sinking Star](https://store.steampowere
 
 ## 网格与适用范围
 
-0.2.3 将游戏版本差异显示为灰色 [SS-GRID-001] 兼容性提示，未知或更高版本仍继续尝试识别和关卡监测，实际数据布局与相机仍须通过校验。它读取逻辑网格与可用的角色高度层，通过场景姿态或原方案的新鲜相机帧生成透视网格，无需识别地砖纹理；场景来源无需栈样本，仍须手动确认贴合。按 E 打开草稿纸时自动定位，不要求先启用网格或染色；已经手动采用的会话网格会继续沿用。游戏渲染尺寸或画布尺寸变化后，等待尺寸稳定 250ms 再自动定位。连续切换会取消前一次未完成的定位，使用最新尺寸。定位等待或失败时暂停旧自动网格的吸附与染色；一般绘画期间冻结网格。
+0.2.4 将游戏版本差异显示为灰色 [SS-GRID-001] 兼容性提示，未知或更高版本仍继续尝试识别和关卡监测，实际数据布局与相机仍须通过校验。它读取逻辑网格与可用的角色高度层，通过场景姿态或原方案的新鲜相机帧生成透视网格，无需识别地砖纹理；场景来源无需栈样本，自动识别交付的可用候选会立即采用；可按 Shift+G 切换候选。按 E 打开草稿纸时自动定位，不要求先启用网格或染色；已经自动或手动采用的会话网格会继续沿用。游戏渲染尺寸或画布尺寸变化后，等待尺寸稳定 250ms 再自动定位。连续切换会取消前一次未完成的定位，使用最新尺寸。定位等待或失败时暂停旧自动网格的吸附与染色；一般绘画期间冻结网格。
 
 Shift+G 打开“临时选择相机”：切换候选预览，可翻转或调整高度，贴合后点击“本次采用”直接启用当前网格。开关绘画面板保留本次吸附；再次打开列表后取消会恢复原网格。主动重新识别、确认切关卡或画面尺寸变化清除旧网格；关卡待确认时暂停吸附，确认仍在原关卡后恢复。三点、四点校准已移除，跨关卡相机学习尚未实现。详见 [临时选择说明](docs/临时相机选择说明.md)。
 
@@ -97,7 +97,7 @@ Shift+G 打开“临时选择相机”：切换候选预览，可翻转或调整
 
 ## 从源码构建
 
-0.1.3 起报错带固定编号，例如 `[SS-GRID-006]` 表示等待新相机帧超时，`[SS-GRID-011]` 表示本次发现方向异常的相机候选。0.2.3 对通过其余校验的新帧先显示方向预览，可在“网格精调”中上下/左右翻转并“确认并记住”，确认前暂停吸附与染色。方向选项随设置保存，不移动已有标注。反馈时提供完整编号、触发操作和关卡/分辨率；详见 [错误代码](docs/错误代码.md)。
+0.1.3 起报错带固定编号，例如 `[SS-GRID-006]` 表示等待新相机帧超时，`[SS-GRID-011]` 表示本次发现方向异常的相机候选。0.2.4 对通过其余校验的新帧先显示方向预览，可在“网格精调”中上下/左右翻转并“确认并记住”，确认前暂停吸附与染色。方向选项随设置保存，不移动已有标注。反馈时提供完整编号、触发操作和关卡/分辨率；详见 [错误代码](docs/错误代码.md)。
 
 需要 Windows x64、PowerShell 5.1+ 和网络连接（首次获取编译器）。依赖源码与字体已经包含在仓库，工具链不进入 Git 历史。
 

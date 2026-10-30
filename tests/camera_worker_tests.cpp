@@ -7,8 +7,8 @@
 using namespace sketch;
 namespace sketch {
 struct GameGridWorkerTestAccess {
- static void fixture(GameGridWorker& worker,uintptr_t* managerSlot,CameraFrame* camera,bool verified=true){
-  auto& reader=worker.levelReader;reader.checked=true;reader.supported=verified;reader.image=reinterpret_cast<uintptr_t>(managerSlot)-0xb69600;
+ static void fixture(GameGridWorker& worker,uintptr_t* managerSlot,CameraFrame* camera,bool verified=true,uintptr_t managerRva=0xb69600){
+  auto& reader=worker.levelReader;reader.checked=true;reader.supported=verified;reader.managerRva=managerRva;reader.image=reinterpret_cast<uintptr_t>(managerSlot)-managerRva;
   reader.candidates.clear();if(camera)reader.candidates={{reinterpret_cast<uintptr_t>(camera),camera->frame(),camera->f[211],camera->sourceType()}};
  }
  static bool idle(const GameGridWorker& worker){return worker.idle();}
@@ -117,15 +117,15 @@ void checkCameraWorker(){
  std::cout<<"PASS: background stack capture, delivery/level guards, request cancellation, auxiliary/projection recovery previews and strict candidate priority\n";
 }
 
-void checkSceneCameraWorker(uintptr_t image,CameraFrame* camera){
- GameGridWorker worker;auto slot=reinterpret_cast<uintptr_t*>(image+0xb69600);
- *camera={};GameGridWorkerTestAccess::fixture(worker,slot,camera);
+void checkSceneCameraWorker(uintptr_t image,CameraFrame* camera,uintptr_t managerRva){
+ GameGridWorker worker;auto slot=reinterpret_cast<uintptr_t*>(image+managerRva);
+ *camera={};GameGridWorkerTestAccess::fixture(worker,slot,camera,true,managerRva);
  assert(worker.begin(3840,2160,false,1)); // No old source, frame clock, or actors.
  Grid grid;GameGridState state=GameGridState::Waiting;
  until([&]{state=worker.poll(grid);return state!=GameGridState::Waiting;});
  assert(state==GameGridState::Preview&&!worker.pickerOptions().empty()&&worker.pickerOptions()[0].scenePose);
  assert(worker.error==ErrorId::None&&!worker.pickerOptions()[0].sceneCorroborated);
- worker.cancel();idle(worker);GameGridWorkerTestAccess::fixture(worker,slot,camera);
+ worker.cancel();idle(worker);GameGridWorkerTestAccess::fixture(worker,slot,camera,true,managerRva);
  assert(worker.beginPicking(3840,2160,1));Sleep(60);advance(*camera);
  until([&]{state=worker.pollPicking();return state!=GameGridState::Waiting;});
  assert(state==GameGridState::Ready&&worker.pickerOptions()[0].scenePose);
@@ -133,19 +133,19 @@ void checkSceneCameraWorker(uintptr_t image,CameraFrame* camera){
  uint32_t changed=9,original=8;std::memcpy(reinterpret_cast<void*>(image+0xb01000+256),&changed,4);
  assert(worker.pollPicking()==GameGridState::Unavailable&&worker.error==ErrorId::LevelChanged);
  std::memcpy(reinterpret_cast<void*>(image+0xb01000+256),&original,4);worker.cancel();idle(worker);
- *camera=gameCameraFixture();GameGridWorkerTestAccess::fixture(worker,slot,camera);
+ *camera=gameCameraFixture();GameGridWorkerTestAccess::fixture(worker,slot,camera,true,managerRva);
  assert(worker.begin(3840,2160,true,1,false));Sleep(60);advance(*camera);
  until([&]{state=worker.poll(grid);return state!=GameGridState::Waiting;});
  assert(state==GameGridState::Ready&&grid.usable());for(const auto& option:worker.pickerOptions())assert(!option.scenePose);
  // Original preference is not a single-source failure trap.
- worker.cancel();idle(worker);*camera={};GameGridWorkerTestAccess::fixture(worker,slot,camera);
+ worker.cancel();idle(worker);*camera={};GameGridWorkerTestAccess::fixture(worker,slot,camera,true,managerRva);
  assert(worker.begin(3840,2160,false,1,false));
  until([&]{state=worker.poll(grid);return state!=GameGridState::Waiting;});
  assert(state==GameGridState::Preview&&worker.error==ErrorId::None&&worker.pickerOptions()[0].scenePose);
  worker.cancel();idle(worker);
  // Neither reader yields a usable grid: only then publish a failure.
  auto orientation=reinterpret_cast<float*>(*slot+0x3db0);float saved=orientation[0];orientation[0]=NAN;
- GameGridWorkerTestAccess::fixture(worker,slot,camera);assert(worker.begin(3840,2160,false,1));
+ GameGridWorkerTestAccess::fixture(worker,slot,camera,true,managerRva);assert(worker.begin(3840,2160,false,1));
  assert(worker.poll(grid)==GameGridState::Waiting);
  until([&]{state=worker.poll(grid);return state!=GameGridState::Waiting;});
  assert(state==GameGridState::Unavailable&&worker.error!=ErrorId::None&&worker.pickerOptions().empty());

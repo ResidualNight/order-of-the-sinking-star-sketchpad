@@ -24,7 +24,7 @@ private:
  bool current(Read)const;
 public:
  const char* status="not_attempted";
- bool discover(Read,uintptr_t image);
+ bool discover(Read,uintptr_t image,uintptr_t managerRva=0xb69600);
  bool sample(Read,uintptr_t manager,SceneCameraPose& output);
  bool available()const{return layout.managerSlot!=0;}
  const Layout& discovered()const{return layout;}

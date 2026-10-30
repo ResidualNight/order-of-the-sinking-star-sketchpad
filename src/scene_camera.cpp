@@ -71,7 +71,7 @@ bool SceneCameraReader::current(Read read)const{
   !contains(layout.image,layout.size,e.address,e.bytes.size())||!read(e.address,bytes,e.bytes.size())||std::memcmp(bytes,e.bytes.data(),e.bytes.size()))return false;}
  return true;
 }
-bool SceneCameraReader::discover(Read read,uintptr_t image){
+bool SceneCameraReader::discover(Read read,uintptr_t image,uintptr_t managerRva){
  layout={};status="pe_unavailable";IMAGE_DOS_HEADER dos{};IMAGE_NT_HEADERS64 nt{};
  if(!get(read,image,dos)||dos.e_magic!=IMAGE_DOS_SIGNATURE||dos.e_lfanew<64||dos.e_lfanew>0x100000||
     !get(read,image+dos.e_lfanew,nt)||nt.Signature!=IMAGE_NT_SIGNATURE||nt.FileHeader.Machine!=IMAGE_FILE_MACHINE_AMD64||
@@ -89,29 +89,34 @@ bool SceneCameraReader::discover(Read read,uintptr_t image){
  }
  status="signature_unavailable";
  int64_t gate=find(code,{0x49,0x8d,0xad,-1,-1,-1,-1,0x48,0x8b,0x05,-1,-1,-1,-1,0x48,0x85,0xc0,0x0f,0x84,-1,-1,-1,-1,0x48,0x83,0xf8,1,0x0f,0x85,-1,-1,-1,-1});
+ int64_t gateR12=find(code,{0x49,0x8d,0xac,0x24,-1,-1,-1,-1,0x48,0x8b,0x05,-1,-1,-1,-1,0x48,0x85,0xc0,0x0f,0x84,-1,-1,-1,-1,0x48,0x83,0xf8,1,0x0f,0x85,-1,-1,-1,-1});
+ if(gate==-2||gateR12==-2||(gate>=0&&gateR12>=0))return false;
+ bool r12=gateR12>=0;if(r12)gate=gateR12;
  int64_t render=find(code,{0x4c,0x8d,0x80,-1,-1,-1,-1,0xf3,0x0f,0x10,0x88,-1,-1,-1,-1,0xf3,0x0f,0x10,0x98,-1,-1,-1,-1,0xf3,0x0f,0x10,0x90,-1,-1,-1,-1});
  int64_t link=find(code,{0x4c,0x8b,0x2d,-1,-1,-1,-1,0x49,0x8d,0x95,-1,-1,-1,-1,0x4d,0x8d,0x85,-1,-1,-1,-1,0x31,0xc9,0xe8,-1,-1,-1,-1});
  if(gate<0||render<47||link<0)return false;
- int64_t normal=gate+23+value<int32_t>(code,gate+19),frozen=gate+33+value<int32_t>(code,gate+29),list=normal+69,write=frozen-17;
- if(!matches(code,normal,{0x4c,0x89,0x74,0x24,-1,0x49,0x83,0xbd,-1,-1,-1,-1,0,0x0f,0x8e,-1,-1,-1,-1})||
+ int64_t normal=gate+23+r12+value<int32_t>(code,gate+19+r12),frozen=gate+33+r12+value<int32_t>(code,gate+29+r12),list=normal+(r12?70:69),write=frozen-(r12?19:17);
+ if(!(r12?matches(code,normal,{0x4c,0x89,0x74,0x24,-1,0x49,0x83,0xbc,0x24,-1,-1,-1,-1,0,0x0f,0x8e,-1,-1,-1,-1}):matches(code,normal,{0x4c,0x89,0x74,0x24,-1,0x49,0x83,0xbd,-1,-1,-1,-1,0,0x0f,0x8e,-1,-1,-1,-1}))||
     !matches(code,normal-23,{0x50,0xc3,0xa8,1,0x0f,0x85,-1,-1,-1,-1,0xf3,0x0f,0x10,0x1d,-1,-1,-1,-1,0xe9,-1,-1,-1,-1})||
-    !matches(code,list,{0x49,0x8b,0x85,-1,-1,-1,-1,0x4c,0x8b,0x34,0xd8})||
-    !matches(code,write,{0x41,0x0f,0x13,0x85,-1,-1,-1,-1,0xf3,0x41,0x0f,0x11,0x95,-1,-1,-1,-1,0x49,0x8b,0x45,0,0x48,0x83,0xc0,0xfb,0x48,0x83,0xf8,0x14,0x0f,0x87,-1,-1,-1,-1})||
+    !(r12?matches(code,list,{0x49,0x8b,0x84,0x24,-1,-1,-1,-1,0x4a,0x8b,0x1c,0xf8}):matches(code,list,{0x49,0x8b,0x85,-1,-1,-1,-1,0x4c,0x8b,0x34,0xd8}))||
+    !(r12?matches(code,write,{0x41,0x0f,0x13,0x84,0x24,-1,-1,-1,-1,0xf3,0x41,0x0f,0x11,0x94,0x24,-1,-1,-1,-1,0x49,0x8b,0x04,0x24,0x48,0x83,0xc0,0xfb,0x48,0x83,0xf8,0x14,0x0f,0x87,-1,-1,-1,-1}):matches(code,write,{0x41,0x0f,0x13,0x85,-1,-1,-1,-1,0xf3,0x41,0x0f,0x11,0x95,-1,-1,-1,-1,0x49,0x8b,0x45,0,0x48,0x83,0xc0,0xfb,0x48,0x83,0xf8,0x14,0x0f,0x87,-1,-1,-1,-1}))||
     !matches(code,render-47,{0x48,0x8d,0x90,-1,-1,-1,-1,0x0f,0xb6,0x0d,-1,-1,-1,-1,0xc0,0xe9,4,0x80,0xe1,1,0x4c,0x8b,0x05,-1,-1,-1,-1,0xf2,0x41,0x0f,0x10,0x40,0x38,0x0f,0x5b,0xc0,0x0f,0x28,0xc8,0x0f,0xc6,0xc8,0x55,0xf3,0x0f,0x5e,0xc1}))return false;
  status="layout_conflict";
- layout.position=value<uint32_t>(code,gate+3);layout.orientation=value<uint32_t>(code,render+3);layout.projection=value<uint32_t>(code,render+11);layout.cameras=value<uint32_t>(code,normal+8);
- int64_t slot=int64_t(base)+link+7+value<int32_t>(code,link+3),mode=int64_t(base)+gate+14+value<int32_t>(code,gate+10);
+ layout.position=value<uint32_t>(code,gate+3+r12);layout.orientation=value<uint32_t>(code,render+3);layout.projection=value<uint32_t>(code,render+11);layout.cameras=value<uint32_t>(code,normal+8+r12);
+ int64_t slot=int64_t(base)+link+7+value<int32_t>(code,link+3),mode=int64_t(base)+gate+14+r12+value<int32_t>(code,gate+10+r12);
  if(layout.position<0x380||layout.position>0x100000||layout.orientation!=layout.position+24||layout.projection!=layout.orientation+16||
-    layout.cameras<0x380||layout.cameras+16>layout.position||value<uint32_t>(code,normal+59)!=layout.cameras||value<uint32_t>(code,list+3)!=layout.cameras+8||
-    value<uint32_t>(code,write+4)!=layout.position||value<uint32_t>(code,frozen-4)!=layout.position+8||value<uint32_t>(code,render-44)!=layout.position||
+    layout.cameras<0x380||layout.cameras+16>layout.position||value<uint32_t>(code,normal+59+r12)!=layout.cameras||value<uint32_t>(code,list+3+r12)!=layout.cameras+8||
+    value<uint32_t>(code,write+4+r12)!=layout.position||value<uint32_t>(code,frozen-4)!=layout.position+8||value<uint32_t>(code,render-44)!=layout.position||
     value<uint32_t>(code,render+19)!=layout.projection+4||value<uint32_t>(code,render+27)!=layout.projection+8||
     value<uint32_t>(code,link+10)!=layout.position||value<uint32_t>(code,link+17)!=layout.orientation||
-    slot<=0||mode<=0||slot!=int64_t(image+0xb69600)||mode==slot||!contains(image,layout.size,uintptr_t(mode),8))return false;
- bool writable=false;for(const auto& s:sections)if((s.Characteristics&(IMAGE_SCN_MEM_WRITE|IMAGE_SCN_MEM_EXECUTE))==IMAGE_SCN_MEM_WRITE&&
-  contains(image+s.VirtualAddress,s.Misc.VirtualSize,uintptr_t(mode),8))writable=true;
- if(!writable)return false;
+    slot<=0||mode<=0||slot!=int64_t(image+managerRva)||mode==slot||!contains(image,layout.size,uintptr_t(mode),8))return false;
+ bool writable=false,slotWritable=false;for(const auto& s:sections)if((s.Characteristics&(IMAGE_SCN_MEM_WRITE|IMAGE_SCN_MEM_EXECUTE))==IMAGE_SCN_MEM_WRITE){
+  if(contains(image+s.VirtualAddress,s.Misc.VirtualSize,uintptr_t(mode),8))writable=true;
+  if(contains(image+s.VirtualAddress,s.Misc.VirtualSize,uintptr_t(slot),8))slotWritable=true;
+ }
+ if(!writable||!slotWritable)return false;
  layout.mode=uintptr_t(mode);
- for(auto span:{std::pair<int64_t,size_t>{gate,33},{normal,19},{list,11},{write,35},{render-47,78},{link,28}}){
+ for(auto span:{std::pair<int64_t,size_t>{gate,size_t(33+r12)},{normal,size_t(19+r12)},{list,size_t(11+r12)},{write,size_t(35+2*r12)},{render-47,78},{link,28}}){
   if(span.first<0||size_t(span.first)>code.size()||span.second>code.size()-size_t(span.first))return false;
   Evidence e;e.address=base+uintptr_t(span.first);e.bytes.assign(code.begin()+span.first,code.begin()+span.first+span.second);layout.evidence.push_back(std::move(e));
  }

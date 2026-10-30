@@ -43,7 +43,7 @@ bool GameGridWorker::start(float w,float h,bool overrideHeight,float z,bool pick
  }
  auto session=std::make_shared<Session>();session->width=w;session->height=h;session->z=z;session->overrideHeight=overrideHeight;session->picking=picking;
  session->requestedLevel=levelReader.pickerLevel;session->requestedManager=levelReader.manager;
- auto& reader=session->reader;reader.checked=levelReader.checked;reader.supported=levelReader.supported;reader.image=levelReader.image;
+ auto& reader=session->reader;reader.checked=levelReader.checked;reader.supported=levelReader.supported;reader.image=levelReader.image;reader.managerRva=levelReader.managerRva;
  reader.requestSerial=serial-1;reader.scanIntervalMs=50;reader.scanOwnThread=false;
  reader.preferScene=preferScene;
  reader.candidates=levelReader.candidates;

@@ -1,5 +1,5 @@
 ﻿[CmdletBinding()]
-param([ValidatePattern('^[0-9]+\.[0-9]+\.[0-9]+$')][string]$Version='0.2.3',[string]$RuntimeArchive,[string]$OutputDirectory)
+param([ValidatePattern('^[0-9]+\.[0-9]+\.[0-9]+$')][string]$Version='0.2.4',[string]$RuntimeArchive,[string]$OutputDirectory)
 $ErrorActionPreference='Stop'
 $root=$PSScriptRoot
 if(!$OutputDirectory){$OutputDirectory=Join-Path $root 'dist'}
@@ -39,6 +39,9 @@ $known=@(($known+'82590a876da45f1b574a2870cffd2ee975ccbd8f50397046940136937636fb
 $known=@(($known+'aa97a8327860696941f94b6b94429d0d46f0fb34ba64774a6fd762828329a779') | Sort-Object -Unique)
 $known=@(($known+'994e464f5a3c47019f20d18d4d6ec58d8a0a3c700f49e8cec0e0ea653c167ccb'+'88b7f6f3b7d3a70e32fdb632297e281ff379fd05ab702a5d2ebbdae03cc2b6a9'+'71526c053d733cea4a91551764dca80b931abe135f204ca229442a486e145828'+'e281f321105650efca5776f11619b3b9adb0a8283d8207048a1682d3b9cc767b') | Sort-Object -Unique)
 $known=@(($known+'c6e1c0e9a5d2326a166a5e22c3992c73eab16acc7e6152d37b2f59b690e03d4c'+'8d27d19df9324d34cf1a3646115cfbe58dff7c09d08403b6bf8b146d673c575f') | Sort-Object -Unique)
+$known=@(($known+'83281a635a7c53058949f615d72d7c60200da12c99d977d27d2005659adc3b1a') | Sort-Object -Unique)
+$known=@(($known+'82d322336c110b1cc8492f45ddd139d35060d3f726735c222c5d15a6deb9448c') | Sort-Object -Unique)
+$known=@(($known+'bc6d6fb6a8d3b2a560971aaf683647d3d765683d3fce25a2aa01195e2f716430') | Sort-Object -Unique)
 $package=[ordered]@{product='StarSketch';schema=1;version=$Version;known_dll_sha256=@($known);game_exe_sha256=$runtime.game_exe_sha256;files=$files}
 [IO.File]::WriteAllText((Join-Path $payload 'StarSketch-package.json'),($package | ConvertTo-Json -Depth 6),[Text.UTF8Encoding]::new($false))
 foreach($name in @('StarSketch-Setup.ps1','StarSketch.Installer.psm1','StarSketch-安装卸载.cmd')){Copy-Item -LiteralPath (Join-Path $root ('installer\'+$name)) -Destination (Join-Path $stage $name)}

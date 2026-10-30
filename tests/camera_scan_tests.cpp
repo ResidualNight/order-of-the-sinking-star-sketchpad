@@ -16,7 +16,7 @@ struct GameGridReaderTestAccess {
   reader.candidates={{reinterpret_cast<uintptr_t>(camera),camera->frame(),camera->f[211]}};
  }
  static void append(GameGridReader& reader,CameraFrame* camera){reader.candidates.push_back({reinterpret_cast<uintptr_t>(camera),camera->frame(),camera->f[211]});}
- static void sceneImage(GameGridReader& reader,uintptr_t image,CameraFrame* camera){reader.checked=true;reader.supported=true;reader.image=image;reader.candidates={{reinterpret_cast<uintptr_t>(camera),camera->frame(),camera->f[211]}};}
+ static void sceneImage(GameGridReader& reader,uintptr_t image,CameraFrame* camera,uintptr_t managerRva){reader.managerRva=managerRva;reader.checked=true;reader.supported=true;reader.image=image;reader.candidates={{reinterpret_cast<uintptr_t>(camera),camera->frame(),camera->f[211]}};}
  static void preferOriginal(GameGridReader& reader){reader.preferScene=false;}
  static void finishCollection(GameGridReader& reader){reader.started=GetTickCount64()-GameGridReader::PickCollectMs;}
  static void timeout(GameGridReader& reader){reader.started=GetTickCount64()-1801;}
@@ -43,13 +43,13 @@ struct GameGridReaderTestAccess {
  }
 };
 }
-void checkSceneCameraReaderFixture(uintptr_t image,CameraFrame* raw,const SceneCameraPose& pose){
- GameGridReader reader;GameGridReaderTestAccess::sceneImage(reader,image,raw);
+void checkSceneCameraReaderFixture(uintptr_t image,CameraFrame* raw,const SceneCameraPose& pose,uintptr_t managerRva){
+ GameGridReader reader;GameGridReaderTestAccess::sceneImage(reader,image,raw,managerRva);
  *raw={};assert(reader.begin(3840,2160,false,1)); // No actors or stack metadata.
  Grid grid;assert(reader.poll(grid)==GameGridState::Preview&&reader.error==ErrorId::None&&!grid.usable());
  auto independent=reader.pickerOptions();assert(independent.size()==1&&independent[0].scenePose&&!independent[0].sceneCorroborated);
  assert(independent[0].camera.frame()==0); // Never manufacture engine counters.
- *raw=gameCameraFixture();raw->f[0]=NAN;GameGridReaderTestAccess::sceneImage(reader,image,raw);assert(reader.begin(3840,2160,true,1));
+ *raw=gameCameraFixture();raw->f[0]=NAN;GameGridReaderTestAccess::sceneImage(reader,image,raw,managerRva);assert(reader.begin(3840,2160,true,1));
  assert(reader.poll(grid)==GameGridState::Preview);
  uint32_t next=raw->frame()+1;std::memcpy(raw->f.data()+225,&next,4);raw->f[211]+=.016f;raw->f[235]=1;
  assert(reader.poll(grid)==GameGridState::Preview&&!reader.pickerOptions()[0].sceneCorroborated); // Map stack evidence cannot corroborate the independent manual pose.
@@ -58,14 +58,14 @@ void checkSceneCameraReaderFixture(uintptr_t image,CameraFrame* raw,const SceneC
  auto projected=cameraOptionGrid(options[0],3840,2160,1,0);assert(projected.usable()&&length(projected.origin-pose.grid(3840,2160,1).origin)<.001f);
  // Like original stack choices, a freshly captured manual snapshot survives
  // a later transient source failure during bounded picker collection.
- *raw=gameCameraFixture();GameGridReaderTestAccess::sceneImage(reader,image,raw);
+ *raw=gameCameraFixture();GameGridReaderTestAccess::sceneImage(reader,image,raw,managerRva);
  assert(reader.beginPicking(3840,2160,1));raw->f[0]=NAN;
  GameGridReaderTestAccess::actors(reader,{{5,100,20}});
  next=raw->frame()+1;std::memcpy(raw->f.data()+225,&next,4);raw->f[211]+=.016f;
  assert(reader.pollPicking()==GameGridState::Waiting);
  options=reader.pickerOptions();assert(!options.empty()&&options[0].scenePose);
  assert(options[0].suggestedZ==1&&!options[0].actorLayer);
- auto orientation=reinterpret_cast<float*>(*reinterpret_cast<uintptr_t*>(image+0xb69600)+0x3db0);
+ auto orientation=reinterpret_cast<float*>(*reinterpret_cast<uintptr_t*>(image+managerRva)+0x3db0);
  float saved=orientation[0];orientation[0]=NAN;
  GameGridReaderTestAccess::finishCollection(reader);
  assert(reader.pollPicking()==GameGridState::Ready);
@@ -74,19 +74,19 @@ void checkSceneCameraReaderFixture(uintptr_t image,CameraFrame* raw,const SceneC
  orientation[0]=saved;reader.cancelPicking();assert(reader.pickerOptions().empty());
  // A failed new-source signature retains the original strict Ready path.
  auto code=reinterpret_cast<unsigned char*>(image)+0x1100;*code^=1;*raw=gameCameraFixture();
- GameGridReaderTestAccess::sceneImage(reader,image,raw);assert(reader.begin(3840,2160,true,1));
+ GameGridReaderTestAccess::sceneImage(reader,image,raw,managerRva);assert(reader.begin(3840,2160,true,1));
  next=raw->frame()+1;std::memcpy(raw->f.data()+225,&next,4);raw->f[211]+=.016f;
  assert(reader.poll(grid)==GameGridState::Ready&&grid.usable());for(const auto& option:reader.pickerOptions())assert(!option.scenePose);*code^=1;
  // Invalid scene source does not mask an old-source preview without actors.
- *code^=1;GameGridReaderTestAccess::sceneImage(reader,image,raw);assert(reader.begin(3840,2160,false,1));
+ *code^=1;GameGridReaderTestAccess::sceneImage(reader,image,raw,managerRva);assert(reader.begin(3840,2160,false,1));
  next=raw->frame()+1;std::memcpy(raw->f.data()+225,&next,4);raw->f[211]+=.016f;
  assert(reader.poll(grid)==GameGridState::Preview&&reader.error==ErrorId::None&&!reader.pickerOptions()[0].scenePose);
  // Both sources unavailable: wait for the request budget before reporting.
- *raw={};GameGridReaderTestAccess::sceneImage(reader,image,raw);assert(reader.begin(3840,2160,false,1));
+ *raw={};GameGridReaderTestAccess::sceneImage(reader,image,raw,managerRva);assert(reader.begin(3840,2160,false,1));
  assert(reader.poll(grid)==GameGridState::Waiting);GameGridReaderTestAccess::timeout(reader);
  assert(reader.poll(grid)==GameGridState::Unavailable&&reader.error!=ErrorId::None&&reader.pickerOptions().empty());*code^=1;
  // Explicit original preference still keeps the independent source as fallback.
- GameGridReaderTestAccess::sceneImage(reader,image,raw);GameGridReaderTestAccess::preferOriginal(reader);
+ GameGridReaderTestAccess::sceneImage(reader,image,raw,managerRva);GameGridReaderTestAccess::preferOriginal(reader);
  assert(reader.begin(3840,2160,false,1)&&reader.poll(grid)==GameGridState::Waiting);
  GameGridReaderTestAccess::timeout(reader);assert(reader.poll(grid)==GameGridState::Preview&&reader.error==ErrorId::None&&reader.pickerOptions()[0].scenePose);
 }

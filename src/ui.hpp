@@ -26,11 +26,10 @@ public:
  Grid pickerPreviousGrid;bool pickerPreviousPinned=false;uint64_t cameraPreviewAdoptions=0;
  GridRefresh gridRefresh;
  bool gridPreferScene=true; // One request only; never persisted.
- bool gridRecoveryPending=false,gridRecoveryScene=false;
+ bool gridRecoveryActive=false,gridRecoveryScene=false;
  std::unique_ptr<CameraOption> recoveryOption;
  int recoveryAspect=0,recoveryFit=0,pickerAspect=0,pickerFit=0;
- void updateRecoveryMapping();
- bool adoptRecoveryGrid();
+ bool updateRecoveryMapping(int aspect,int fit);
  uint64_t availableUpdate=0;
  ErrorId gameBuildWarning=ErrorId::None;
  LevelWatch levelWatch;bool autoClearOnLevel=false,levelPaused=false;

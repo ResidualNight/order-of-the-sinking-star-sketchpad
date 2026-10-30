@@ -1,4 +1,5 @@
 #pragma once
+#include "game_layout.hpp"
 #include "camera_grid.hpp"
 #include "camera_scan.hpp"
 #include "camera_diagnostics.hpp"
@@ -30,7 +31,7 @@ class GameGridReader {
  uint32_t sceneLatestFrame=0,scenePriorFrame=0;float sceneLatestTime=0,scenePriorTime=0;
  size_t sceneReads=0,sceneMatches=0,sceneFresh=0;
  LevelIdentity pickerLevel;bool picking=false;
- uintptr_t image=0,manager=0;bool checked=false,supported=false,heightOverride=false,rejectedCameraOrientation=false;
+ uintptr_t image=0,manager=0,managerRva=GameLayouts[0].managerRva;bool checked=false,supported=false,heightOverride=false,rejectedCameraOrientation=false;
  float width=0,height=0,forcedZ=1;uint64_t started=0,lastScan=0;
  CameraScanStats scanStats;
  uint64_t scanIntervalMs=250;bool scanOwnThread=true;

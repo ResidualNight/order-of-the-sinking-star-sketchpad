@@ -1,6 +1,6 @@
 ﻿[CmdletBinding()]
 param(
-    [ValidatePattern('^[0-9]+\.[0-9]+\.[0-9]+$')][string]$Version='0.2.3',
+    [ValidatePattern('^[0-9]+\.[0-9]+\.[0-9]+$')][string]$Version='0.2.4',
     [string]$BinaryPath,
     [string]$ToolchainPath,
     [string]$OutputDirectory
@@ -42,6 +42,6 @@ try{
         [IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip,$file.FullName,$entryName,[IO.Compression.CompressionLevel]::Optimal) | Out-Null
     }
 }finally{$zip.Dispose();$stream.Dispose()}
-$manifest=[ordered]@{version=$Version;archive=[IO.Path]::GetFileName($archive);archive_sha256=(Get-FileHash -LiteralPath $archive).Hash.ToLower();dll_sha256=(Get-FileHash -LiteralPath $BinaryPath).Hash.ToLower();game_exe_sha256='0ae10a513dae25286fe93d0db4fa8a2df9a473bc07e1734e12bc1ad30166db1c'}
+$manifest=[ordered]@{version=$Version;archive=[IO.Path]::GetFileName($archive);archive_sha256=(Get-FileHash -LiteralPath $archive).Hash.ToLower();dll_sha256=(Get-FileHash -LiteralPath $BinaryPath).Hash.ToLower();game_exe_sha256='d802098b7cb85eadfc733b88d1554042fad950c572e916febea3f669a474a549'}
 $manifest | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $OutputDirectory ('StarSketch-'+$Version+'-manifest.json')) -Encoding UTF8
 Write-Output $archive

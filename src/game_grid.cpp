@@ -12,15 +12,18 @@
 namespace sketch { namespace {
 bool read(uintptr_t address,void*data,size_t size){SIZE_T done=0;return address>0x10000&&ReadProcessMemory(GetCurrentProcess(),reinterpret_cast<void*>(address),data,size,&done)&&done==size;}
 template<class T>bool get(uintptr_t address,T&data){return read(address,&data,sizeof(data));}
-bool fingerprint(){
- static const unsigned char expected[]={0x0a,0xe1,0x0a,0x51,0x3d,0xae,0x25,0x28,0x6f,0xe9,0x3d,0x0d,0xb4,0xfa,0x8a,0x2d,0xf9,0xa4,0x73,0xbc,0x07,0xe1,0x73,0x4e,0x12,0xbc,0x1a,0xd3,0x01,0x66,0xdb,0x1c};
+bool fingerprint(uintptr_t& managerRva){
+
  wchar_t path[32768];if(!GetModuleFileNameW(nullptr,path,32768))return false;
  HANDLE file=CreateFileW(path,GENERIC_READ,FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);if(file==INVALID_HANDLE_VALUE)return false;
  BCRYPT_ALG_HANDLE algorithm=nullptr;BCRYPT_HASH_HANDLE hash=nullptr;bool success=false;
  if(BCryptOpenAlgorithmProvider(&algorithm,BCRYPT_SHA256_ALGORITHM,nullptr,0)>=0&&BCryptCreateHash(algorithm,&hash,nullptr,0,nullptr,0,0)>=0){
   unsigned char buffer[65536],digest[32];DWORD count=0;bool ok=true;
   for(;;){if(!ReadFile(file,buffer,sizeof(buffer),&count,nullptr)){ok=false;break;}if(!count)break;if(BCryptHashData(hash,buffer,count,0)<0){ok=false;break;}}
-  success=ok&&BCryptFinishHash(hash,digest,sizeof(digest),0)>=0&&std::memcmp(expected,digest,32)==0;
+  if(ok&&BCryptFinishHash(hash,digest,sizeof(digest),0)>=0){
+   char hex[65]{};for(int i=0;i<32;++i)std::snprintf(hex+2*i,3,"%02x",digest[i]);
+   if(auto layout=knownGameLayout(hex)){managerRva=layout->managerRva;success=true;}
+  }
  }
  if(hash)BCryptDestroyHash(hash);if(algorithm)BCryptCloseAlgorithmProvider(algorithm,0);CloseHandle(file);return success;
 }
@@ -39,7 +42,7 @@ bool pointerArray(uintptr_t address,int64_t maximum,std::vector<uintptr_t>&out){
 bool GameGridReader::readLevel(){
  // Try the r67271 layout on unverified builds too; every read and layout check
  // remains required. The executable fingerprint is a compatibility warning.
- if(!get(image+0xb69600,manager)||!manager)return fail(ErrorId::EntityManagerUnavailable);
+ if(!get(image+managerRva,manager)||!manager)return fail(ErrorId::EntityManagerUnavailable);
  std::vector<uintptr_t> settings;if(!pointerArray(manager+0xdd0,4,settings))return fail(ErrorId::SettingsArrayUnavailable);
  uintptr_t selected=0;for(auto p:settings){uintptr_t owner=0;if(get(p+240,owner)&&owner==manager&&typeMatches(p,"Settings",1320)){selected=p;break;}}
  struct Gridlike{int64_t x,y,count;uint8_t wrapping,pad[3];int32_t corner[3];}g{};
@@ -199,7 +202,7 @@ void GameGridReader::captureBeforeOverlay(float w,float h){
 }
 bool GameGridReader::localizationContext(){
  uintptr_t active=0;LevelIdentity current;
- if(!get(image+0xb69600,active)||active!=manager||!readValidatedLevel(read,image,current)||current!=pickerLevel)return fail(ErrorId::LevelChanged);
+ if(!get(image+managerRva,active)||active!=manager||!readValidatedLevel(read,image,current,managerRva)||current!=pickerLevel)return fail(ErrorId::LevelChanged);
  return true;
 }
 std::vector<std::string> GameGridReader::failureDetails()const{
@@ -209,7 +212,7 @@ std::vector<std::string> GameGridReader::failureDetails()const{
  lines.push_back("scan"+scanDiagnostic());
  lines.push_back("capture rounds="+std::to_string(observationRound)+" early="+std::to_string(earlyCaptures)+" history="+std::to_string(observations.size())+" scan_fresh="+std::to_string(scanFresh)+" poll_fresh="+std::to_string(pollFresh)+" moved_fresh="+std::to_string(movedFresh)+" auxiliary_fresh="+std::to_string(auxiliaryFresh));
  lines.push_back("recovery projection_preview_checks="+std::to_string(projectionPreviewChecks)+" aspect_preview_checks="+std::to_string(aspectPreviewChecks)+" choices="+std::to_string(choices.size())+" geometry_rejected="+std::to_string(previewGeometryRejected)+" height_fallbacks="+std::to_string(previewHeightFallbacks)+" preview_only=1 projection_error<=1 composition_error<0.025");
- lines.push_back(std::string("scene_camera profile=retail-r13-2026-10-17b status=")+sceneReader.status+" reads="+std::to_string(sceneReads)+" matches="+std::to_string(sceneMatches)+" fresh="+std::to_string(sceneFresh)+" preview="+std::to_string(sceneChoice?1:0)+" corroborated="+std::to_string(sceneChoice&&sceneChoice->sceneCorroborated?1:0)+" metadata_sources="+std::to_string(sceneSources.size())+" stack_required=0 manual_confirmation=1 prefer_scene="+std::to_string(preferScene?1:0));
+ lines.push_back(std::string("scene_camera profile=")+(managerRva==GameLayouts[1].managerRva?GameLayouts[1].name:GameLayouts[0].name)+" status="+sceneReader.status+" reads="+std::to_string(sceneReads)+" matches="+std::to_string(sceneMatches)+" fresh="+std::to_string(sceneFresh)+" preview="+std::to_string(sceneChoice?1:0)+" corroborated="+std::to_string(sceneChoice&&sceneChoice->sceneCorroborated?1:0)+" metadata_sources="+std::to_string(sceneSources.size())+" stack_required=0 manual_confirmation=1 prefer_scene="+std::to_string(preferScene?1:0));
  char memory[1000];std::snprintf(memory,sizeof(memory),"scan_access query_api_failures=%zu query_api_error=0x%lx snapshot_failures=%zu snapshot_error=0x%lx enumeration_failures=%zu enumeration_error=0x%lx open_thread_failures=%zu open_thread_error=0x%lx query_thread_failures=%zu query_ntstatus=0x%lx tib_read_failures=%zu tib_read_error=0x%lx bad_stack_ranges=%zu virtual_query_failures=%zu virtual_query_error=0x%lx guard_regions=%zu uncommitted_regions=%zu retry_recovered=%zu retry_failures=%zu read_error=0x%lx",scanStats.queryApiFailures,scanStats.queryApiError,scanStats.snapshotFailures,scanStats.snapshotError,scanStats.enumerationFailures,scanStats.enumerationError,scanStats.openThreadFailures,scanStats.openThreadError,scanStats.queryThreadFailures,static_cast<unsigned long>(scanStats.threadQueryStatus),scanStats.tibReadFailures,scanStats.tibReadError,scanStats.badStackRanges,scanStats.virtualQueryFailures,scanStats.virtualQueryError,scanStats.guardRegions,scanStats.uncommittedRegions,scanStats.retryRecovered,scanStats.retryFailures,scanStats.readError);lines.emplace_back(memory);
  auto camera=cameraDiagnostics.lines();lines.insert(lines.end(),camera.begin(),camera.end());return lines;
 }
@@ -217,11 +220,11 @@ std::string GameGridReader::scanDiagnostic()const{
  char detail[480];std::snprintf(detail,sizeof(detail)," scans=%zu threads=%zu stacks=%zu bytes=%zu unreadable=%zu read_failures=%zu viewport_matches=%zu invalid=%zu orientation=%zu valid=%zu system_error=0x%lx",scanStats.scans,scanStats.threads,scanStats.stackRanges,scanStats.bytes,scanStats.unreadableRegions,scanStats.readFailures,scanStats.viewportMatches,scanStats.invalid,scanStats.orientation,scanStats.valid,static_cast<unsigned long>(scanStats.systemError));return detail;
 }
 bool GameGridReader::verifyBuild(){
- if(!checked){checked=true;supported=fingerprint();image=reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));}
+ if(!checked){checked=true;supported=fingerprint(managerRva);image=reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));}
  return supported;
 }
 bool GameGridReader::readCurrentLevel(LevelIdentity& identity){
- verifyBuild();return readValidatedLevel(read,image,identity);
+ verifyBuild();return readValidatedLevel(read,image,identity,managerRva);
 }
 bool GameGridReader::begin(float w,float h,bool overrideHeight,float z){
  cancelPicking();
@@ -232,8 +235,8 @@ bool GameGridReader::begin(float w,float h,bool overrideHeight,float z){
  error=ErrorId::None;diagnostic.clear();directionCategory=0;rejectedCameraOrientation=false;scanStats={};cameraDiagnostics={};levelValidated=false;planeSelected=false;++requestSerial;
  width=w;height=h;heightOverride=overrideHeight;forcedZ=z;started=GetTickCount64();lastScan=started;
  verifyBuild();if(!readLevel())return false;
- if(!readValidatedLevel(read,image,pickerLevel))return fail(ErrorId::LevelChanged);levelValidated=true;
- sceneReader=SceneCameraReader{};sceneReader.discover(read,image);
+ if(!readValidatedLevel(read,image,pickerLevel,managerRva))return fail(ErrorId::LevelChanged);levelValidated=true;
+ sceneReader=SceneCameraReader{};sceneReader.discover(read,image,managerRva);
  scenePoseValid=sceneReader.available()&&sceneReader.sample(read,manager,scenePose);
  std::vector<Candidate> live;for(auto c:candidates){auto frame=std::make_unique<CameraFrame>();if(!read(c.address,frame->f.data(),960)){cameraDiagnostics.record(CameraStage::Cache,{CameraValidation::Invalid,CameraReject::ReadFailure},nullptr,0,0,GetLastError());continue;}observeScene(c.address,*frame);if(acceptsCamera(*frame,CameraStage::Cache))live.push_back({c.address,frame->frame(),frame->f[211],frame->sourceType()});}
  candidates=std::move(live);
@@ -262,10 +265,10 @@ GameGridState GameGridReader::poll(Grid& grid){
   if(nearest==1e100)return recoverOrWait(actors.empty()?ErrorId::ActorLayerUnavailable:ErrorId::VisibleActorLayerUnavailable);
  }
  planeSelected=true;
- uintptr_t activeManager=0;if(!get(image+0xb69600,activeManager)||activeManager!=manager){fail(ErrorId::LevelChanged);return GameGridState::Unavailable;}
+ uintptr_t activeManager=0;if(!get(image+managerRva,activeManager)||activeManager!=manager){fail(ErrorId::LevelChanged);return GameGridState::Unavailable;}
  grid=gridFromCamera(*best,width,height,planeZ,true);if(!grid.usable())return recoverOrWait(ErrorId::ProjectedGridInvalid);
  directionCategory=cameraOrientation(*best).category;
- char message[560];std::snprintf(message,sizeof(message),"game_data layout=r67271 verified_build=%d frame=%u logical=%dx%d z=%.3f render=%.0fx%.0f output=%.0fx%.0f candidates=%zu manager=0x%llx direction_category=%u manual_direction=%d source_type=%u source=%s capture=%s capture_age_ms=%llu",supported?1:0,best->frame(),columns,rows,planeZ,1.f/best->f[216],1.f/best->f[217],width,height,candidates.size(),static_cast<unsigned long long>(manager),unsigned(directionCategory),directionCategory?1:0,best->sourceType(),cameraSourceName(best->sourceType()),CameraStageNames[size_t(capturedStage)],static_cast<unsigned long long>(now-capturedAt));diagnostic=message;return GameGridState::Ready;
+ char message[560];std::snprintf(message,sizeof(message),"game_data layout=%s verified_build=%d frame=%u logical=%dx%d z=%.3f render=%.0fx%.0f output=%.0fx%.0f candidates=%zu manager=0x%llx direction_category=%u manual_direction=%d source_type=%u source=%s capture=%s capture_age_ms=%llu",managerRva==GameLayouts[1].managerRva?GameLayouts[1].name:GameLayouts[0].name,supported?1:0,best->frame(),columns,rows,planeZ,1.f/best->f[216],1.f/best->f[217],width,height,candidates.size(),static_cast<unsigned long long>(manager),unsigned(directionCategory),directionCategory?1:0,best->sourceType(),cameraSourceName(best->sourceType()),CameraStageNames[size_t(capturedStage)],static_cast<unsigned long long>(now-capturedAt));diagnostic=message;return GameGridState::Ready;
 }
 GameGridState GameGridReader::previewResult(){
  error=ErrorId::None;diagnostic="camera_preview manual_confirmation=1 scene="+std::to_string(sceneChoice?1:0)+" stack_choices="+std::to_string(choices.size());
@@ -286,17 +289,17 @@ float GameGridReader::suggestedPlane(const CameraFrame& frame,bool& actorLayer)c
 bool GameGridReader::pickerContext(float w,float h){
  if(w!=width||h!=height)return fail(ErrorId::CameraChoiceExpired);
  uintptr_t active=0;LevelIdentity current;
- if(!get(image+0xb69600,active)||active!=manager||!readValidatedLevel(read,image,current)||current!=pickerLevel)return fail(ErrorId::LevelChanged);
+ if(!get(image+managerRva,active)||active!=manager||!readValidatedLevel(read,image,current,managerRva)||current!=pickerLevel)return fail(ErrorId::LevelChanged);
  return true;
 }
 bool GameGridReader::beginPicking(float w,float h,float fallbackZ){
  if(!std::isfinite(fallbackZ)||std::abs(fallbackZ)>10000)return fail(ErrorId::ProjectedGridInvalid);
  verifyBuild();LevelIdentity before;
- if(!readValidatedLevel(read,image,before)){if(!begin(w,h,true,fallbackZ))return false;return fail(ErrorId::LevelChanged);}
+ if(!readValidatedLevel(read,image,before,managerRva)){if(!begin(w,h,true,fallbackZ))return false;return fail(ErrorId::LevelChanged);}
  // Height is explicitly editable in the picker; unavailable actors do not
  // prevent previewing a validated camera at the supplied fallback height.
  if(!begin(w,h,true,fallbackZ))return false;
- if(!readValidatedLevel(read,image,pickerLevel)||pickerLevel!=before||pickerLevel.columns!=columns||pickerLevel.rows!=rows)return fail(ErrorId::LevelChanged);
+ if(!readValidatedLevel(read,image,pickerLevel,managerRva)||pickerLevel!=before||pickerLevel.columns!=columns||pickerLevel.rows!=rows)return fail(ErrorId::LevelChanged);
  picking=true;if(candidates.size()>PickMaxCandidates)candidates.resize(PickMaxCandidates);return true;
 }
 void GameGridReader::offerChoice(uintptr_t address,const CameraFrame& frame){

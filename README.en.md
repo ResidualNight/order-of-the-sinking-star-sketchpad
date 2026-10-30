@@ -6,24 +6,24 @@
 
 An in-game sketchpad for **[Order of the Sinking Star](https://store.steampowered.com/app/499170/Order_of_the_Sinking_Star/)** on Windows x64 / DirectX 12.
 
-Draw freehand lines and arrows, place stars and numbered markers, and overlay a translucent checkerboard on the game screen. The grid uses game data and the camera's perspective, with temporary camera selection available in 0.2.3. This is an independent project, not an official game component.
+Draw freehand lines and arrows, place stars and numbered markers, and overlay a translucent checkerboard on the game screen. The grid uses game data and the camera's perspective, with temporary camera selection available in 0.2.4. This is an independent project, not an official game component.
 
-**Current version: 0.2.3 test build.** Adds an independent scene-camera source while keeping the original method as a fallback. A localization error is reported only when neither method yields a usable grid. Preview support covers common 4:3, 5:4, 16:9, 16:10, 21:9 and 32:9 displays, with stretch, centered letterboxing and centered cropping options. Enabling the grid no longer opens the picker automatically: inspect the main-canvas preview and select **采用候选网格** (Adopt candidate grid). Shift+G still opens the picker. Error reporting and diagnostic copy are also available. The user has tested this installed build successfully; broader machine and level coverage remains pending. See the [0.2.3 release notes (Chinese)](https://github.com/ResidualNight/order-of-the-sinking-star-sketchpad/releases/tag/v0.2.3-test).
+**Current version: 0.2.4 test build.** Supports Steam build 26249670 from October 30, 2026, while retaining r67271 support. A usable candidate grid is now adopted automatically and snapping starts immediately; checkerboard tint follows the T toggle. Temporary camera selection and common aspect mappings remain available. This also fixes stale-grid re-adoption after refresh and lost mapping controls after canceling camera selection. The user tested the corresponding feature build successfully; broader machine and level coverage remains pending. See the [0.2.4 release notes (Chinese)](https://github.com/ResidualNight/order-of-the-sinking-star-sketchpad/releases/tag/v0.2.4-test).
 
 This page provides English instructions; the current in-game interface and installer use Chinese. Chinese button labels are included below to help you navigate them.
 
 ## Download and installation
 
-**The graphical installer is recommended.** Both ZIP packages contain the same 0.2.3 test-build DLL and game features. No development tools are required. Download one of the player packages below from **Assets** on the [0.2.3 release page](https://github.com/ResidualNight/order-of-the-sinking-star-sketchpad/releases/tag/v0.2.3-test). GitHub's automatically generated **Source code** archives are not player packages.
+**The graphical installer is recommended.** Both ZIP packages contain the same 0.2.4 test-build DLL and game features. No development tools are required. Download one of the player packages below from **Assets** on the [0.2.4 release page](https://github.com/ResidualNight/order-of-the-sinking-star-sketchpad/releases/tag/v0.2.4-test). GitHub's automatically generated **Source code** archives are not player packages.
 
 | Method | Download | What it does |
 | --- | --- | --- |
-| Graphical installation / update / removal (recommended) | [StarSketch-0.2.3-installer.zip](https://github.com/ResidualNight/order-of-the-sinking-star-sketchpad/releases/download/v0.2.3-test/StarSketch-0.2.3-installer.zip) | Select the game folder, install, check for updates, or uninstall |
-| Manual file copy | [StarSketch-0.2.3-r67271-test.zip](https://github.com/ResidualNight/order-of-the-sinking-star-sketchpad/releases/download/v0.2.3-test/StarSketch-0.2.3-r67271-test.zip) | Copy the DLL and assets yourself |
+| Graphical installation / update / removal (recommended) | [StarSketch-0.2.4-installer.zip](https://github.com/ResidualNight/order-of-the-sinking-star-sketchpad/releases/download/v0.2.4-test/StarSketch-0.2.4-installer.zip) | Select the game folder, install, check for updates, or uninstall |
+| Manual file copy | [StarSketch-0.2.4-r67271-test.zip](https://github.com/ResidualNight/order-of-the-sinking-star-sketchpad/releases/download/v0.2.4-test/StarSketch-0.2.4-r67271-test.zip) | Copy the DLL and assets yourself |
 
 ### Option 1: Graphical installer / uninstaller
 
-1. Save your progress and exit the game. **Extract the entire `StarSketch-0.2.3-installer.zip` into its own folder.** Do not run the EXE from inside the ZIP or extract only the EXE.
+1. Save your progress and exit the game. **Extract the entire `StarSketch-0.2.4-installer.zip` into its own folder.** Do not run the EXE from inside the ZIP or extract only the EXE.
 2. Run `StarSketch-安装卸载.exe`, or the `StarSketch-安装卸载.cmd` file in the same folder.
 3. Browse to or paste the game installation folder that directly contains `sinking_star.exe`. In Steam, right-click the game in your Library, then choose **Manage → Browse local files**.
 4. Click **检查目录** (Check folder), confirm that the folder is correct, then click **安装 / 更新** (Install / Update). Wait for the success message.
@@ -39,7 +39,7 @@ The game folder keeps a management entry at `StarSketch-Manager/StarSketch-安�
 
 ### Option 2: Manual file copy
 
-1. Save your progress, exit the game, and extract `StarSketch-0.2.3-r67271-test.zip`.
+1. Save your progress, exit the game, and extract `StarSketch-0.2.4-r67271-test.zip`.
 2. Copy **`dxgi.dll` and the entire `StarSketch-assets/` folder** into the folder containing `sinking_star.exe`. Do not put them inside an extra nested extraction folder.
 3. Keep the included instructions and `licenses/` folder. Launch the game through Steam and press **E** to open the sketchpad.
 
@@ -59,9 +59,9 @@ Always exit the game before installing, updating, or uninstalling with either me
 
 ## Controls
 
-When the internal render aspect differs from the window, inspect the candidate before adopting it. Use **网格精调** (Grid fine tuning) to choose stretch, centered letterboxing or centered cropping. Scene-camera previews also let you select the actual game-image aspect; the original method uses the internal aspect it reads. For a centered 2560×1440 image inside a 2560×1600 window, select 16:9 and **居中黑边** (Centered letterboxing). Black bars are not detected automatically. Mapping choices and grid geometry remain session-only.
+Usable candidate grids are adopted automatically. Use **网格精调** (Grid fine tuning) to choose stretch, centered letterboxing or centered cropping; changes apply immediately. Scene cameras also let you select the actual game-image aspect, while the original method uses the internal aspect it reads. For a centered 2560×1440 image inside a 2560×1600 window, select 16:9 and **居中黑边** (Centered letterboxing). Black bars are not detected automatically. Changing aspect or fit rebuilds the grid and resets lower-level fine tuning, so select the mapping before adjusting spacing. Mapping and geometry remain session-only.
 
-These are the default bindings for version 0.2.3. The former numbered-star tool is now split into unnumbered stars (**P**) and numbered markers (**N**). Except for entering and leaving drawing mode, tool shortcuts work only while drawing mode is active.
+These are the default bindings for version 0.2.4. The former numbered-star tool is now split into unnumbered stars (**P**) and numbered markers (**N**). Except for entering and leaving drawing mode, tool shortcuts work only while drawing mode is active.
 
 | Key | Action |
 | --- | --- |
@@ -89,7 +89,7 @@ Existing marks remain fixed to the screen and stay visible after leaving drawing
 
 ## Grid detection and supported scope
 
-Version 0.2.3 shows a gray [SS-GRID-001] compatibility warning and continues localization and level monitoring on unverified or newer builds; runtime layouts and camera checks must still pass. It reads the logical grid and available character height, using either a scene pose or a fresh camera frame from the original method to build a perspective grid. The scene source does not require stack samples and still needs explicit confirmation of alignment. Opening the sketchpad with E refreshes localization, even with the grid and checkerboard hidden; a manually adopted session grid is retained. A render/output size change schedules localization after the size has been stable for 250 ms. Repeated resizing cancels the previous pending request and uses the latest size. While localization is pending or fails, snapping and checkerboard rendering from the old automatic grid are suspended. The grid otherwise stays frozen during ordinary drawing.
+Version 0.2.4 shows a gray [SS-GRID-001] compatibility warning and continues localization and level monitoring on unverified or newer builds; runtime layouts and camera checks must still pass. It reads the logical grid and available character height, using either a scene pose or a fresh camera frame from the original method to build a perspective grid. The scene source does not require stack samples; usable candidates delivered by automatic localization are adopted immediately. Opening the sketchpad with E refreshes localization, even with the grid and checkerboard hidden; an automatically or manually adopted session grid is retained. A render/output size change schedules localization after the size has been stable for 250 ms. Repeated resizing cancels the previous pending request and uses the latest size. While localization is pending or fails, snapping and checkerboard rendering from the old automatic grid are suspended. The grid otherwise stays frozen during ordinary drawing.
 
 Shift+G opens the temporary camera picker. Preview candidates, adjust flips or height, and click **本次采用** (Apply for this session) to use the displayed grid immediately. Closing and reopening drawing mode keeps it; canceling a later selection restores it. Explicit relocalization, a confirmed level change, or a render/output resize clears the old grid. Unconfirmed level data pauses snapping until the same level is confirmed again. Three-point and four-point calibration have been removed; cross-level camera learning is not implemented. See the [camera-picker guide (Chinese)](docs/临时相机选择说明.md).
 
@@ -99,7 +99,7 @@ When characters occupy different height layers, the default is the layer of the 
 
 ## Building from source
 
-Since 0.1.3, errors carry stable identifiers. For example, `[SS-GRID-006]` means waiting for a fresh camera frame timed out, and `[SS-GRID-011]` indicates that an abnormal camera-orientation candidate was found. Version 0.2.3 can preview a fresh frame that passes every other check: use **上下翻转** (Flip vertically), **左右翻转** (Flip horizontally), then **确认并记住** (Confirm and remember) under Fine-tune grid. Snapping and tinting stay paused until confirmed. Direction choices persist with preferences; existing marks stay in place. When reporting a problem, include the complete identifier, triggering action, level, and resolution. See the [error-code reference (Chinese)](docs/错误代码.md).
+Since 0.1.3, errors carry stable identifiers. For example, `[SS-GRID-006]` means waiting for a fresh camera frame timed out, and `[SS-GRID-011]` indicates that an abnormal camera-orientation candidate was found. Version 0.2.4 can preview a fresh frame that passes every other check: use **上下翻转** (Flip vertically), **左右翻转** (Flip horizontally), then **确认并记住** (Confirm and remember) under Fine-tune grid. Snapping and tinting stay paused until confirmed. Direction choices persist with preferences; existing marks stay in place. When reporting a problem, include the complete identifier, triggering action, level, and resolution. See the [error-code reference (Chinese)](docs/错误代码.md).
 
 You need Windows x64, PowerShell 5.1+, and a network connection for the initial compiler download. Dependency sources and the font are included in the repository; the toolchain is excluded from Git history.
 
