@@ -9,12 +9,25 @@
 #include "camera_picker.hpp"
 #include "feedback.hpp"
 #include "imgui.h"
+#include "gamepad_ui.hpp"
 #include <string>
 #include <set>
 #include <memory>
 namespace sketch {
 class App {
 public:
+ // Persistent input preferences; no pointer, focus, marks or grid is serialized.
+ int padUiMode=0;bool padEntryEnabled=true;float padSpeed=1;
+ bool padNavBusy=false;bool padLayout=false,padOpening=false,padUsed=false,padPointer=false,padReady=false,padQuick=false,padEraseTool=false,padConfirmClear=false;
+ bool padWheel=false,padWheelVisible=false;int padWheelSelection=-1;double padWheelStarted=0;
+ int padPage=0;PadInput padInput{};uint16_t padPrevious=0,padPressed=0;
+ bool padRt=false,padLt=false,padRtPrevious=false;Point padCursor{};
+ float padWidth=0,padHeight=0;double padRepeatAt=0;uint16_t padDirection=0;
+ std::string padStatus;
+ bool padMenu()const{return padWheel||padQuick||settingsOpen||cameraPickerOpen||reportOpen;}
+ void openFromPad();void resetPadGesture();void padPrepare(const PadInput& input);
+ void padActions(float width,float height);void padPanel(float width,float height);void padCanvas(float width,float height);
+ void drawPadWheel(float width,float height);void applyPadWheel(int index);void choosePadTool(int index);void gridTuningPanel();
  Document document;Grid grid;Kind tool=Kind::Stroke;
  bool gridFromGame=false,gridPlaneOverride=false;float gridPlaneZ=1;
  // Only the user's flip choice persists, separately for each raw direction
@@ -22,7 +35,7 @@ public:
  std::array<int,8> gridDirections{{0,-1,-1,-1,-1,-1,-1,-1}};
  Grid gameGridBase;int gridDirectionCategory=0,gridDirection=0;
  float gridOutputWidth=0,gridOutputHeight=0;bool gridDirectionPending=false;
- bool gridConfirmed=false,gridPinned=false;bool editing=false,gridEnabled=false,tint=false,cameraPickerOpen=false,wantExit=false;
+ bool gridConfirmed=false,gridPinned=false;bool editing=false,gridEnabled=false,tint=false,monochromeTint=false,cameraPickerOpen=false,wantExit=false;
  Grid pickerPreviousGrid;bool pickerPreviousPinned=false;uint64_t cameraPreviewAdoptions=0;
  GridRefresh gridRefresh;
  bool gridPreferScene=true; // One request only; never persisted.

@@ -14,6 +14,9 @@
 #include "game_grid_worker.hpp"
 #include "preferences.hpp"
 #include "update_check.hpp"
+#include "controller_probe.hpp"
+#include "controller_runtime.hpp"
+#include "controller_glyphs.hpp"
 #include <atomic>
 #include <mutex>
 #include <map>
@@ -37,7 +40,7 @@ void logGridFailure(UINT64 width,UINT height){
  for(const auto& line:gameGrid.failureDetails())log("[%s] grid_request=%llu pid=%lu %s",sketch::errorInfo(id).code,request,pid,line.c_str());
 }
 void require(HRESULT hr,const char*what){if(FAILED(hr)){log("[SS-DX12-001] %s: HRESULT=0x%08lx",what,(unsigned long)hr);throw std::runtime_error(what);}}
-void systemDxgi(){static std::once_flag once;std::call_once(once,[]{wchar_t path[MAX_PATH];GetSystemDirectoryW(path,MAX_PATH);wcscat_s(path,L"\\dxgi.dll");realDxgi=LoadLibraryW(path);log("StarSketch %s | camera diagnostics 20261026 | camera picker preview adopt 20261026 | quarter viewport fix 20261026 | camera capture fix 20261027 | background camera sampling 20261029 | camera recovery preview 20261029 | error report helper 20261029 | scene camera preview 20261029 | %s | independent DX12 overlay | system DXGI loaded=%d",sketch::CurrentVersion,sketch::DiagnosticsBuild,realDxgi!=nullptr);});}
+void systemDxgi(){static std::once_flag once;std::call_once(once,[]{wchar_t path[MAX_PATH];GetSystemDirectoryW(path,MAX_PATH);wcscat_s(path,L"\\dxgi.dll");realDxgi=LoadLibraryW(path);try{sketch::probe::start([](const char* message){log("%s",message);});}catch(...){log("[SS-INPUT-002] Controller hook initialization failed");}log("StarSketch %s | camera diagnostics 20261026 | camera picker preview adopt 20261026 | quarter viewport fix 20261026 | camera capture fix 20261027 | background camera sampling 20261029 | camera recovery preview 20261029 | error report helper 20261029 | scene camera preview 20261029 | %s | independent DX12 overlay | system DXGI loaded=%d",sketch::CurrentVersion,sketch::DiagnosticsBuild,realDxgi!=nullptr);});}
 template<class T>T real(const char*name){systemDxgi();return reinterpret_cast<T>(GetProcAddress(realDxgi,name));}
 std::string graphicsEnvironment(ID3D12Device* device){
  auto create=real<HRESULT(WINAPI*)(REFIID,void**)>("CreateDXGIFactory1");Com<IDXGIFactory4> factory;Com<IDXGIAdapter1> adapter;DXGI_ADAPTER_DESC1 desc{};
@@ -55,6 +58,7 @@ template<class T>T original(void*object,size_t index){std::lock_guard<std::mutex
 void setEditing(bool enabled){
  if(editing.exchange(enabled)==enabled)return;
  app.setEditing(enabled);
+ if(!enabled)sketch::controller::cancel(app);
  if(!enabled){auto error=preferences.update(app,sketch::GridRefresh::now(),true);if(error!=sketch::ErrorId::None)log("%s",sketch::errorMessage(error).c_str());}
  ClipCursor(nullptr);if(ImGui::GetCurrentContext())ImGui::GetIO().MouseDrawCursor=enabled;log("Drawing mode %s",enabled?"ON":"OFF");
 }
@@ -85,7 +89,7 @@ LRESULT CALLBACK windowProc(HWND window,UINT message,WPARAM wparam,LPARAM lparam
 
  bool active=editing.load();
  if(message==WM_CLOSE){std::lock_guard<std::recursive_mutex>lock(renderMutex);auto error=preferences.update(app,sketch::GridRefresh::now(),true);if(error!=sketch::ErrorId::None)log("%s",sketch::errorMessage(error).c_str());}
- if(message==WM_KILLFOCUS){std::lock_guard<std::recursive_mutex>lock(renderMutex);setEditing(false);}
+ if(message==WM_KILLFOCUS||(message==WM_SIZE&&wparam==SIZE_MINIMIZED)){std::lock_guard<std::recursive_mutex>lock(renderMutex);setEditing(false);}
  {std::lock_guard<std::recursive_mutex>lock(renderMutex);if(ImGui::GetCurrentContext()){bool keyboardMessage=message==WM_KEYDOWN||message==WM_KEYUP||message==WM_SYSKEYDOWN||message==WM_SYSKEYUP;if(polledButton(message)){int button=(message==WM_LBUTTONDOWN||message==WM_LBUTTONUP||message==WM_LBUTTONDBLCLK)?0:((message==WM_RBUTTONDOWN||message==WM_RBUTTONUP||message==WM_RBUTTONDBLCLK)?1:2);lastMouseMessage[button]=GetTickCount64();}if(!(keyboardMessage&&polledKey(wparam))&&(!polledButton(message)||active))ImGui_ImplWin32_WndProcHandler(window,message,wparam,lparam);}}
  if(active){if(message==WM_INPUT)return DefWindowProcW(window,message,wparam,lparam);if((message>=WM_MOUSEFIRST&&message<=WM_MOUSELAST)||(message>=WM_KEYFIRST&&message<=WM_KEYLAST)||message==WM_CHAR)return 0;if(message==WM_SETCURSOR)return TRUE;}
  return CallWindowProcW(previousWndProc,window,message,wparam,lparam);
@@ -99,7 +103,7 @@ public:
  void releaseBuffers(){if(initialized){flush();ImGui_ImplDX12_Shutdown();initialized=false;}frames.clear();commands.reset();rtvHeap.reset();srvHeap.reset();}
  void bind(IDXGISwapChain*swap,IUnknown*unknown){Com<ID3D12CommandQueue>candidate;if(FAILED(unknown->QueryInterface(__uuidof(ID3D12CommandQueue),(void**)candidate.put())))return;Com<IDXGISwapChain3>chain;if(FAILED(swap->QueryInterface(__uuidof(IDXGISwapChain3),(void**)chain.put())))return;std::lock_guard<std::recursive_mutex>lock(renderMutex);if(target==chain.p)return;if(initialized)releaseBuffers();target=chain.p;queue=std::move(candidate);disabled=false;log("D3D12 swapchain attached");}
  bool init(IDXGISwapChain3*swap){DXGI_SWAP_CHAIN_DESC desc{};require(swap->GetDesc(&desc),"swapchain desc");if(desc.BufferCount<2||!desc.OutputWindow)return false;require(swap->GetDevice(__uuidof(ID3D12Device),(void**)device.put()),"D3D12 device");format=desc.BufferDesc.Format;
-  if(!context){IMGUI_CHECKVERSION();ImGui::CreateContext();auto&io=ImGui::GetIO();io.IniFilename=nullptr;io.LogFilename=nullptr;std::wstring fontPath=basePath()+L"StarSketch-assets\\NotoSerifSC.ttf";int n=WideCharToMultiByte(CP_UTF8,0,fontPath.c_str(),-1,nullptr,0,nullptr,nullptr);std::string utf(n,'\0');WideCharToMultiByte(CP_UTF8,0,fontPath.c_str(),-1,utf.data(),n,nullptr,nullptr);static ImVector<ImWchar> glyphRanges;ImFontGlyphRangesBuilder glyphBuilder;glyphBuilder.AddRanges(io.Fonts->GetGlyphRangesChineseSimplifiedCommon());glyphBuilder.AddText(sketch::UiGlyphs);for(const auto& error:sketch::Errors)glyphBuilder.AddText(error.message);glyphBuilder.BuildRanges(&glyphRanges);if(!io.Fonts->AddFontFromFileTTF(utf.c_str(),32,nullptr,glyphRanges.Data))throw std::runtime_error("Chinese font missing");
+  if(!context){IMGUI_CHECKVERSION();ImGui::CreateContext();auto&io=ImGui::GetIO();io.IniFilename=nullptr;io.LogFilename=nullptr;std::wstring fontPath=basePath()+L"StarSketch-assets\\NotoSerifSC.ttf";int n=WideCharToMultiByte(CP_UTF8,0,fontPath.c_str(),-1,nullptr,0,nullptr,nullptr);std::string utf(n,'\0');WideCharToMultiByte(CP_UTF8,0,fontPath.c_str(),-1,utf.data(),n,nullptr,nullptr);static ImVector<ImWchar> glyphRanges;ImFontGlyphRangesBuilder glyphBuilder;glyphBuilder.AddRanges(io.Fonts->GetGlyphRangesChineseSimplifiedCommon());glyphBuilder.AddText(sketch::UiGlyphs);glyphBuilder.AddText(sketch::probe::Glyphs);glyphBuilder.AddText(sketch::ControllerGlyphs);for(const auto& error:sketch::Errors)glyphBuilder.AddText(error.message);glyphBuilder.BuildRanges(&glyphRanges);if(!io.Fonts->AddFontFromFileTTF(utf.c_str(),32,nullptr,glyphRanges.Data))throw std::runtime_error("Chinese font missing");
    static const ImWchar digits[]={0x30,0x39,0};ImFontConfig numberConfig;numberConfig.RasterizerMultiply=1.3f;app.numberFont=io.Fonts->AddFontFromFileTTF(utf.c_str(),96,&numberConfig,digits);if(!app.numberFont)throw std::runtime_error("Number font missing");
    auto preferenceError=preferences.load(app);if(preferenceError!=sketch::ErrorId::None)log("%s",sketch::errorMessage(preferenceError).c_str());
    ImGui::StyleColorsDark();auto&style=ImGui::GetStyle();style.WindowRounding=7;style.FrameRounding=3;style.WindowBorderSize=1;style.Colors[ImGuiCol_WindowBg]={.035f,.055f,.085f,.96f};style.Colors[ImGuiCol_Border]={.64f,.51f,.27f,.9f};style.Colors[ImGuiCol_Button]={.18f,.20f,.23f,1};style.Colors[ImGuiCol_ButtonHovered]={.34f,.30f,.20f,1};style.Colors[ImGuiCol_FrameBg]={.12f,.16f,.21f,1};style.Colors[ImGuiCol_SliderGrab]={.76f,.61f,.32f,1};style.Colors[ImGuiCol_Text]={.87f,.84f,.73f,1};
@@ -137,7 +141,7 @@ public:
     log("Game resolution changed: %llux%u -> %llux%u; grid refresh scheduled",(unsigned long long)renderWidth,renderHeight,(unsigned long long)desc.Width,desc.Height);
    }
    renderWidth=desc.Width;renderHeight=desc.Height;
-   ImGui_ImplDX12_NewFrame();ImGui_ImplWin32_NewFrame();ImGui::NewFrame();
+   ImGui_ImplDX12_NewFrame();ImGui_ImplWin32_NewFrame();sketch::controller::poll(app,GetForegroundWindow()==gameWindow);if(app.editing!=editing.load())setEditing(app.editing);ImGui::NewFrame();
    auto&io=ImGui::GetIO();app.resize(io.DisplaySize.x,io.DisplaySize.y);
    // Process-lifetime state: workers hold a module reference and publish only an
    // atomic numeric version. Network I/O and parsing never run on this thread.
@@ -218,16 +222,16 @@ public:
    auto preferenceError=preferences.update(app,sketch::GridRefresh::now(),settingsWereOpen&&!app.settingsOpen);if(preferenceError!=sketch::ErrorId::None)log("%s",sketch::errorMessage(preferenceError).c_str());
    if(app.editing!=editing.load())setEditing(app.editing);
    if(app.inputError!=sketch::ErrorId::None){log("%s | %s",sketch::errorMessage(app.inputError).c_str(),app.bindingStatus.c_str());app.inputError=sketch::ErrorId::None;}
-   if(app.wantExit){app.wantExit=false;setEditing(false);}ImGui::Render();
+   if(app.wantExit){app.wantExit=false;setEditing(false);}sketch::controller::synchronize(app,GetForegroundWindow()==gameWindow);ImGui::Render();
    barrier(f.buffer.p,D3D12_RESOURCE_STATE_PRESENT,D3D12_RESOURCE_STATE_RENDER_TARGET);commands->OMSetRenderTargets(1,&f.rtv,FALSE,nullptr);ID3D12DescriptorHeap*heap=srvHeap.p;commands->SetDescriptorHeaps(1,&heap);ImGui_ImplDX12_RenderDrawData(ImGui::GetDrawData(),commands.p);barrier(f.buffer.p,D3D12_RESOURCE_STATE_RENDER_TARGET,D3D12_RESOURCE_STATE_PRESENT);require(commands->Close(),"frame close");ID3D12CommandList*list=commands.p;queue->ExecuteCommandLists(1,&list);require(queue->Signal(fence.p,++value),"frame signal");f.fenceValue=value;
-  }catch(const std::exception&e){disabled=true;editing.store(false);ClipCursor(nullptr);log("[SS-DX12-002] Overlay disabled after error: %s",e.what());}
+  }catch(const std::exception&e){disabled=true;sketch::probe::emergency();editing.store(false);ClipCursor(nullptr);log("[SS-DX12-002] Overlay disabled after error: %s",e.what());}
  }
 };
 Renderer renderer;
 HRESULT STDMETHODCALLTYPE present(IDXGISwapChain3*s,UINT sync,UINT flags){if(!(flags&DXGI_PRESENT_TEST))renderer.render(s);return original<HRESULT(STDMETHODCALLTYPE*)(IDXGISwapChain3*,UINT,UINT)>(s,8)(s,sync,flags);}
 HRESULT STDMETHODCALLTYPE present1(IDXGISwapChain3*s,UINT sync,UINT flags,const DXGI_PRESENT_PARAMETERS*p){if(!(flags&DXGI_PRESENT_TEST))renderer.render(s);return original<HRESULT(STDMETHODCALLTYPE*)(IDXGISwapChain3*,UINT,UINT,const DXGI_PRESENT_PARAMETERS*)>(s,22)(s,sync,flags,p);}
-HRESULT STDMETHODCALLTYPE resize(IDXGISwapChain3*s,UINT n,UINT w,UINT h,DXGI_FORMAT f,UINT flags){if(s==renderer.target){std::lock_guard<std::recursive_mutex>lock(renderMutex);try{renderer.releaseBuffers();}catch(...){renderer.disabled=true;}}return original<HRESULT(STDMETHODCALLTYPE*)(IDXGISwapChain3*,UINT,UINT,UINT,DXGI_FORMAT,UINT)>(s,13)(s,n,w,h,f,flags);}
-HRESULT STDMETHODCALLTYPE resize1(IDXGISwapChain3*s,UINT n,UINT w,UINT h,DXGI_FORMAT f,UINT flags,const UINT*masks,IUnknown*const*queues){if(s==renderer.target){std::lock_guard<std::recursive_mutex>lock(renderMutex);try{renderer.releaseBuffers();}catch(...){renderer.disabled=true;}}return original<HRESULT(STDMETHODCALLTYPE*)(IDXGISwapChain3*,UINT,UINT,UINT,DXGI_FORMAT,UINT,const UINT*,IUnknown*const*)>(s,39)(s,n,w,h,f,flags,masks,queues);}
+HRESULT STDMETHODCALLTYPE resize(IDXGISwapChain3*s,UINT n,UINT w,UINT h,DXGI_FORMAT f,UINT flags){if(s==renderer.target){std::lock_guard<std::recursive_mutex>lock(renderMutex);try{renderer.releaseBuffers();}catch(...){renderer.disabled=true;sketch::probe::emergency();editing.store(false);ClipCursor(nullptr);}}return original<HRESULT(STDMETHODCALLTYPE*)(IDXGISwapChain3*,UINT,UINT,UINT,DXGI_FORMAT,UINT)>(s,13)(s,n,w,h,f,flags);}
+HRESULT STDMETHODCALLTYPE resize1(IDXGISwapChain3*s,UINT n,UINT w,UINT h,DXGI_FORMAT f,UINT flags,const UINT*masks,IUnknown*const*queues){if(s==renderer.target){std::lock_guard<std::recursive_mutex>lock(renderMutex);try{renderer.releaseBuffers();}catch(...){renderer.disabled=true;sketch::probe::emergency();editing.store(false);ClipCursor(nullptr);}}return original<HRESULT(STDMETHODCALLTYPE*)(IDXGISwapChain3*,UINT,UINT,UINT,DXGI_FORMAT,UINT,const UINT*,IUnknown*const*)>(s,39)(s,n,w,h,f,flags,masks,queues);}
 void attach(IDXGISwapChain*swap,IUnknown*queue){if(!swap||!queue)return;try{renderer.bind(swap,queue);Com<IDXGISwapChain3>s;if(SUCCEEDED(swap->QueryInterface(__uuidof(IDXGISwapChain3),(void**)s.put()))){hook(s.p,8,(void*)present);hook(s.p,13,(void*)resize);hook(s.p,22,(void*)present1);hook(s.p,39,(void*)resize1);}}catch(const std::exception&e){log("[SS-HOOK-001] Attach failed: %s",e.what());}}
 HRESULT STDMETHODCALLTYPE createSwap(IDXGIFactory*factory,IUnknown*q,DXGI_SWAP_CHAIN_DESC*d,IDXGISwapChain**s){auto hr=original<HRESULT(STDMETHODCALLTYPE*)(IDXGIFactory*,IUnknown*,DXGI_SWAP_CHAIN_DESC*,IDXGISwapChain**)>(factory,10)(factory,q,d,s);if(SUCCEEDED(hr))attach(*s,q);return hr;}
 HRESULT STDMETHODCALLTYPE createHwnd(IDXGIFactory2*factory,IUnknown*q,HWND hwnd,const DXGI_SWAP_CHAIN_DESC1*d,const DXGI_SWAP_CHAIN_FULLSCREEN_DESC*f,IDXGIOutput*o,IDXGISwapChain1**s){auto hr=original<HRESULT(STDMETHODCALLTYPE*)(IDXGIFactory2*,IUnknown*,HWND,const DXGI_SWAP_CHAIN_DESC1*,const DXGI_SWAP_CHAIN_FULLSCREEN_DESC*,IDXGIOutput*,IDXGISwapChain1**)>(factory,15)(factory,q,hwnd,d,f,o,s);if(SUCCEEDED(hr))attach(*s,q);return hr;}
