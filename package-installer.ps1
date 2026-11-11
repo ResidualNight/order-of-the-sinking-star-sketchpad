@@ -1,5 +1,5 @@
 ﻿[CmdletBinding()]
-param([ValidatePattern('^[0-9]+\.[0-9]+\.[0-9]+$')][string]$Version='0.2.4',[string]$RuntimeArchive,[string]$OutputDirectory)
+param([ValidatePattern('^[0-9]+\.[0-9]+\.[0-9]+$')][string]$Version='0.2.5',[string]$RuntimeArchive,[string]$OutputDirectory)
 $ErrorActionPreference='Stop'
 $root=$PSScriptRoot
 if(!$OutputDirectory){$OutputDirectory=Join-Path $root 'dist'}
@@ -42,6 +42,11 @@ $known=@(($known+'c6e1c0e9a5d2326a166a5e22c3992c73eab16acc7e6152d37b2f59b690e03d
 $known=@(($known+'83281a635a7c53058949f615d72d7c60200da12c99d977d27d2005659adc3b1a') | Sort-Object -Unique)
 $known=@(($known+'82d322336c110b1cc8492f45ddd139d35060d3f726735c222c5d15a6deb9448c') | Sort-Object -Unique)
 $known=@(($known+'bc6d6fb6a8d3b2a560971aaf683647d3d765683d3fce25a2aa01195e2f716430') | Sort-Object -Unique)
+# Retain the verified Preview 6 and ordinary patch builds for owned upgrades.
+$known=@(($known+'c18e356a1e44a21ff573a0d0316a52f0f00d526cb66750af757b38038577c529'+'3c6de153310992c1bc1c9f193d68a210dff6d3fa1d616546222f9ee50d0743e5') | Sort-Object -Unique)
+$known=@(($known+'af0eb90888d19b41dcb0913ddba8d2ef7ee8128500eafeca2a5d3edf26dc31cb') | Sort-Object -Unique)
+$known=@(($known+'4830c6b1f77aeb4171b9156cb29c2f89af43d53036e01167d9132c6674ed6d95') | Sort-Object -Unique)
+$known=@(($known+'90f1c4360e624a6ddf09f22134b1ebc98b0d5194da763d6e227ba4536e7a24b6') | Sort-Object -Unique)
 $package=[ordered]@{product='StarSketch';schema=1;version=$Version;known_dll_sha256=@($known);game_exe_sha256=$runtime.game_exe_sha256;files=$files}
 [IO.File]::WriteAllText((Join-Path $payload 'StarSketch-package.json'),($package | ConvertTo-Json -Depth 6),[Text.UTF8Encoding]::new($false))
 foreach($name in @('StarSketch-Setup.ps1','StarSketch.Installer.psm1','StarSketch-安装卸载.cmd')){Copy-Item -LiteralPath (Join-Path $root ('installer\'+$name)) -Destination (Join-Path $stage $name)}

@@ -12,7 +12,7 @@ class GameGridWorker {
  uint64_t serial=0;
  std::vector<CameraOption> options;
  std::vector<std::string> details;
- bool start(float w,float h,bool overrideHeight,float z,bool picking,bool preferScene=true);
+ bool start(float w,float h,bool overrideHeight,float z,bool picking,bool preferScene=true,bool settleCamera=false);
  GameGridState result(bool picking,Grid* grid);
  static void run(const std::shared_ptr<Service>& service);
  static DWORD WINAPI worker(void* context);
@@ -23,7 +23,7 @@ public:
  GameGridWorker(const GameGridWorker&)=delete;
  GameGridWorker& operator=(const GameGridWorker&)=delete;
  ErrorId error=ErrorId::None;std::string diagnostic;float planeZ=1;uint8_t directionCategory=0;
- bool begin(float w,float h,bool overrideHeight,float z,bool preferScene=true){return start(w,h,overrideHeight,z,false,preferScene);}
+ bool begin(float w,float h,bool overrideHeight,float z,bool preferScene=true,bool settleCamera=false){return start(w,h,overrideHeight,z,false,preferScene,settleCamera);}
  bool beginPicking(float w,float h,float z){return start(w,h,true,z,true);}
  GameGridState poll(Grid& grid){return result(false,&grid);}
  GameGridState pollPicking(){return result(true,nullptr);}

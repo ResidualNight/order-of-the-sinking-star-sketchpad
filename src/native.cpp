@@ -165,7 +165,7 @@ public:
    }else if(refresh.ready()){
     gameGrid.cancelPicking();
     if(!refresh.pending){
-     refresh.pending=gameGrid.begin(float(desc.Width),float(desc.Height),app.gridPlaneOverride,app.gridPlaneZ,app.gridPreferScene);
+     refresh.pending=gameGrid.begin(float(desc.Width),float(desc.Height),app.gridPlaneOverride,app.gridPlaneZ,app.gridPreferScene,app.gridLevelSettling);
      log("Game grid localization started: %llux%u",(unsigned long long)desc.Width,desc.Height);
      if(!refresh.pending){
       app.rejectGameGrid(gameGrid.error);

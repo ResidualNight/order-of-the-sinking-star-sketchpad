@@ -6,6 +6,7 @@
 #include "quarter_camera_fixture.hpp"
 #include "level_watch_tests.hpp"
 #include "camera_diagnostics_tests.hpp"
+#include "grid_stability_tests.hpp"
 #include <iostream>
 #include <cassert>
 using namespace sketch;
@@ -167,7 +168,7 @@ void checkCameraRenderScale(const CameraFrame& captured){
   <<" render-size cases, rounding, projection equivalence and invalid-size rejection\n";
 }
 }
-int main(){std::cout.setf(std::ios::unitbuf);
+int main(){std::cout.setf(std::ios::unitbuf);checkGridStability();
  checkLevelWatch();
  checkCameraDiagnostics();
  Document d;Mark s;s.points={{0,0},{100,0}};d.add(s);auto before=d.snapshot();assert(d.eraseCircle({50,0},10));d.record(before);assert(d.marks.size()==2);assert(d.marks[0].points.back().x<40);assert(d.marks[1].points.front().x>60);assert(d.undo());assert(d.marks.size()==1&&d.marks[0].points.size()==2);assert(d.redo());assert(d.marks.size()==2);

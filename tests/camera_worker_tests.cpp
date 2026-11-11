@@ -126,6 +126,12 @@ void checkSceneCameraWorker(uintptr_t image,CameraFrame* camera,uintptr_t manage
  assert(state==GameGridState::Preview&&!worker.pickerOptions().empty()&&worker.pickerOptions()[0].scenePose);
  assert(worker.error==ErrorId::None&&!worker.pickerOptions()[0].sceneCorroborated);
  worker.cancel();idle(worker);GameGridWorkerTestAccess::fixture(worker,slot,camera,true,managerRva);
+ auto started=GetTickCount64();assert(worker.begin(3840,2160,false,1,true,true));
+ Sleep(200);assert(worker.poll(grid)==GameGridState::Waiting);
+ until([&]{state=worker.poll(grid);return state!=GameGridState::Waiting;});
+ assert(state==GameGridState::Preview&&GetTickCount64()-started>=GridStability::MinimumMs);
+ Sleep(300);assert(worker.poll(grid)==GameGridState::Unavailable&&worker.error==ErrorId::CameraUnsettled);
+ worker.cancel();idle(worker);GameGridWorkerTestAccess::fixture(worker,slot,camera,true,managerRva);
  assert(worker.beginPicking(3840,2160,1));Sleep(60);advance(*camera);
  until([&]{state=worker.pollPicking();return state!=GameGridState::Waiting;});
  assert(state==GameGridState::Ready&&worker.pickerOptions()[0].scenePose);

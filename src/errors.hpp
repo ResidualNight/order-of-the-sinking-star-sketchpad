@@ -6,7 +6,7 @@ enum class ErrorId {
  None,UnsupportedGameBuild,EntityManagerUnavailable,SettingsArrayUnavailable,SettingsGridInvalid,
  ActorLayerUnavailable,FreshCameraFrameUnavailable,VisibleActorLayerUnavailable,LevelChanged,
  ProjectedGridInvalid,CameraNotFound,CameraOrientationInvalid,CameraChoiceExpired,UnknownGameGrid,ImageGridUnconfirmed,ImageGridUnreliable,
- UnsupportedCaptureFormat,InvalidCalibration,KeyBindingConflict,ConfigReadFailure,ConfigWriteFailure,AuxiliaryCameraOnly,CameraWorkerUnavailable,CameraPreviewUnconfirmed,ReportFolderUnavailable,ReportClipboardUnavailable,ReportDiagnosticsUnavailable,Count
+ UnsupportedCaptureFormat,InvalidCalibration,KeyBindingConflict,ConfigReadFailure,ConfigWriteFailure,AuxiliaryCameraOnly,CameraWorkerUnavailable,CameraPreviewUnconfirmed,ReportFolderUnavailable,ReportClipboardUnavailable,ReportDiagnosticsUnavailable,CameraUnsettled,Count
 };
 struct ErrorInfo {const char* code;const char* diagnostic;const char* message;};
 inline constexpr ErrorInfo Errors[]={
@@ -36,7 +36,8 @@ inline constexpr ErrorInfo Errors[]={
  {"SS-GRID-015","camera_preview_unconfirmed","已显示候选网格，请检查贴合后本次采用；暂不启用吸附与染色"},
  {"SS-REPORT-001","report_folder_unavailable","无法打开游戏目录，请手动找到沉星之序安装目录中的 StarSketch.log"},
  {"SS-REPORT-002","report_clipboard_unavailable","无法复制邮箱，请重试，或手动填写 xlwpy@qq.com"},
- {"SS-REPORT-003","report_diagnostics_unavailable","无法复制诊断信息，请重试，或直接发送 StarSketch.log 并说明分辨率和运行环境"}
+ {"SS-REPORT-003","report_diagnostics_unavailable","无法复制诊断信息，请重试，或直接发送 StarSketch.log 并说明分辨率和运行环境"},
+ {"SS-GRID-016","level_camera_not_settled","切关相机仍未稳定，请等待过场结束后重新识别，或临时选择相机"}
 };
 static_assert(sizeof(Errors)/sizeof(Errors[0])==static_cast<unsigned>(ErrorId::Count));
 inline const ErrorInfo& errorInfo(ErrorId id){

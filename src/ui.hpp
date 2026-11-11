@@ -32,7 +32,7 @@ public:
  bool updateRecoveryMapping(int aspect,int fit);
  uint64_t availableUpdate=0;
  ErrorId gameBuildWarning=ErrorId::None;
- LevelWatch levelWatch;bool autoClearOnLevel=false,levelPaused=false;
+ LevelWatch levelWatch;bool autoClearOnLevel=false,levelPaused=false,gridLevelSettling=false;
  float penWidth=3,eraseRadius=18,pinRadius=26,markOpacity=.78f,tintOpacity=.18f;
  std::array<uint32_t,5> colors{{IM_COL32(238,111,113,255),IM_COL32(255,255,255,255),IM_COL32(113,187,244,255),IM_COL32(128,214,163,255),IM_COL32(240,204,109,255)}};
  int colorIndex=0;uint32_t selectedColor()const{return colors[colorIndex];}
@@ -57,7 +57,8 @@ public:
  bool observeLevel(const LevelIdentity* identity,uint64_t now);
  bool setEditing(bool enabled);
  void requestGrid(bool resized=false);
- void requestOriginalGrid(){requestGrid();gridPreferScene=false;gridEnabled=true;}
+ void requestImmediateGrid(){gridLevelSettling=false;requestGrid();gridEnabled=true;}
+ void requestOriginalGrid(){requestImmediateGrid();gridPreferScene=false;}
  void finishGesture();
  void cancelGesture(){drawing=false;current.points.clear();}
  void startCameraPicker();void cancelCameraPicker(bool restorePrevious=true);

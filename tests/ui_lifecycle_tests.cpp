@@ -157,7 +157,11 @@ void pickerInteractions(){
  app.observeLevel(nullptr,800);assert(app.gridPinned&&!app.gridConfirmed&&app.levelPaused);
  app.observeLevel(&first,1000);assert(app.gridPinned&&app.gridConfirmed&&!app.levelPaused&&!app.gridRefresh.requested);
  for(uint64_t time:{1200,1400,1600,1800})app.observeLevel(&second,time);
- assert(!app.gridPinned&&!app.gridConfirmed&&app.gridRefresh.requested&&app.document.marks.size()==2);
+ assert(!app.gridPinned&&!app.gridConfirmed&&app.gridRefresh.requested&&app.document.marks.size()==2&&app.gridLevelSettling);
+ app.gridRefresh.pending=true;auto deadline=app.gridRefresh.notBefore;
+ app.setEditing(false);app.setEditing(true);assert(app.gridLevelSettling&&app.gridRefresh.requested&&app.gridRefresh.pending&&app.gridRefresh.notBefore==deadline);
+ app.resize(2560,1440);assert(app.gridLevelSettling);app.resize(1920,1080);
+ app.requestImmediateGrid();assert(!app.gridLevelSettling&&app.gridRefresh.requested&&!app.gridRefresh.pending&&app.gridEnabled);
  options[1]=options[0];
  app.startCameraPicker();app.acceptCameraOptions(options,1920,1080);app.failCameraPicker(ErrorId::CameraChoiceExpired);
  assert(app.cameraPickerOpen&&app.cameraPickerPreview().usable());
@@ -217,7 +221,8 @@ void recoveryPreviewInteractions(){
  assert(app.gridPinned&&!app.snappingReady()&&distance(app.grid.at(2,3),paused.at(2,3))<.001f);
  app.observeLevel(&first,1000);assert(app.snappingReady());
  for(uint64_t time:{1200,1400,1600,1800})app.observeLevel(&second,time);
- assert(!app.gridPinned&&!app.snappingReady()&&app.gridRefresh.requested&&!app.grid.usable());
+ assert(!app.gridPinned&&!app.snappingReady()&&app.gridRefresh.requested&&!app.grid.usable()&&app.gridLevelSettling);
+ app.acceptCameraRecoveryOptions(options,1920,1080);assert(!app.gridLevelSettling&&app.gridPinned&&app.snappingReady());
  app.acceptCameraRecoveryOptions({},2560,1600);assert(!app.snappingReady()&&!app.gridPinned&&!app.grid.usable());
 }
 void errorReportInteractions(){
