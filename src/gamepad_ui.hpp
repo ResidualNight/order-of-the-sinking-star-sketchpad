@@ -5,6 +5,10 @@ namespace sketch {
 struct PadInput {bool connected=false;uint16_t buttons=0;float lx=0,ly=0,rx=0,ry=0;uint8_t lt=0,rt=0;};
 namespace padui {
 constexpr uint16_t Up=1,Down=2,Left=4,Right=8,Menu=16,Back=32,LB=256,RB=512,A=4096,B=8192,X=16384,Y=32768;
+inline float wheelRadius(float width,float height,float uiScale,float scale){
+ float base=std::min({175.f*uiScale,height*.31f,width*.4f});
+ return std::min({base*scale,height*.31f,width*.4f});
+}
 // Clockwise from twelve o'clock. Returning to center explicitly cancels.
 inline int wheelSelection(float x,float y,int previous=-1){
  float radius=std::sqrt(x*x+y*y);if(!std::isfinite(radius)||radius<.35f)return -1;

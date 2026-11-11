@@ -17,7 +17,7 @@ namespace sketch {
 class App {
 public:
  // Persistent input preferences; no pointer, focus, marks or grid is serialized.
- int padUiMode=0;bool padEntryEnabled=true;float padSpeed=1;
+ int padUiMode=0;bool padEntryEnabled=true;float padSpeed=1,padWheelScale=.8f,padWheelOpacity=1;
  bool padNavBusy=false;bool padLayout=false,padOpening=false,padUsed=false,padPointer=false,padReady=false,padQuick=false,padEraseTool=false,padConfirmClear=false;
  bool padWheel=false,padWheelVisible=false;int padWheelSelection=-1;double padWheelStarted=0;
  int padPage=0;PadInput padInput{};uint16_t padPrevious=0,padPressed=0;
@@ -45,7 +45,7 @@ public:
  bool updateRecoveryMapping(int aspect,int fit);
  uint64_t availableUpdate=0;
  ErrorId gameBuildWarning=ErrorId::None;
- LevelWatch levelWatch;bool autoClearOnLevel=false,levelPaused=false;
+ LevelWatch levelWatch;bool autoClearOnLevel=false,levelPaused=false,gridLevelSettling=false;
  float penWidth=3,eraseRadius=18,pinRadius=26,markOpacity=.78f,tintOpacity=.18f;
  std::array<uint32_t,5> colors{{IM_COL32(238,111,113,255),IM_COL32(255,255,255,255),IM_COL32(113,187,244,255),IM_COL32(128,214,163,255),IM_COL32(240,204,109,255)}};
  int colorIndex=0;uint32_t selectedColor()const{return colors[colorIndex];}
@@ -70,7 +70,8 @@ public:
  bool observeLevel(const LevelIdentity* identity,uint64_t now);
  bool setEditing(bool enabled);
  void requestGrid(bool resized=false);
- void requestOriginalGrid(){requestGrid();gridPreferScene=false;gridEnabled=true;}
+ void requestImmediateGrid(){gridLevelSettling=false;requestGrid();gridEnabled=true;}
+ void requestOriginalGrid(){requestImmediateGrid();gridPreferScene=false;}
  void finishGesture();
  void cancelGesture(){drawing=false;current.points.clear();}
  void startCameraPicker();void cancelCameraPicker(bool restorePrevious=true);

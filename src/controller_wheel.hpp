@@ -34,11 +34,12 @@ void App::applyPadWheel(int index){
  if(index>=0&&index<4){choosePadTool(index);return;}
  if(index==4){document.clear();status="已清屏，可用 Y 撤销";}
  else if(index==5){tint=!(tint&&monochromeTint);monochromeTint=true;if(tint&&!gridConfirmed&&!gridRecoveryActive&&!gridDirectionPending&&!levelPaused)requestGrid();}
- else if(index==6){requestGrid();gridEnabled=true;}
+ else if(index==6){requestImmediateGrid();}
 }
 void App::drawPadWheel(float w,float h){
  if(!editing||!padWheel||!padWheelVisible)return;
- auto dl=ImGui::GetForegroundDrawList();float r=std::min({175.f*uiScale,h*.31f,w*.4f}),inner=r*.43f;
+ auto dl=ImGui::GetForegroundDrawList();int firstVertex=dl->VtxBuffer.Size;
+ float r=padui::wheelRadius(w,h,uiScale,padWheelScale),inner=r*.43f;
  ImVec2 center{w*.5f,h*.43f};auto gold=IM_COL32(232,199,126,255),white=IM_COL32(244,239,220,255);
  dl->AddRectFilled({0,0},{w,h},IM_COL32(2,5,11,112));dl->AddCircleFilled(center,r+7*uiScale,IM_COL32(5,10,18,238),96);
  constexpr float sector=2*wheel::Pi/7;
@@ -62,5 +63,7 @@ void App::drawPadWheel(float w,float h){
  const char*hint=padWheelSelection==4?"松开 X 清屏 · Y 可撤销":(padWheelSelection==5?(tint&&monochromeTint?"松开 X 关闭染色":"松开 X 开启染色"):"左摇杆选择 · 松开 X 执行");
  centered(hint,labelY+font+15*uiScale,std::min(17.f*uiScale,r*.115f),gold);
  centered("回中取消选择 · B 取消轮盘",labelY+font+35*uiScale,std::min(15.f*uiScale,r*.10f),IM_COL32(196,202,213,255));
+ // Fade only vertices appended by this overlay, including its dimmer and labels.
+ for(int i=firstVertex;i<dl->VtxBuffer.Size;++i){auto&color=dl->VtxBuffer[i].col;unsigned alpha=(color>>IM_COL32_A_SHIFT)&255;alpha=unsigned(alpha*padWheelOpacity+.5f);color=(color&~IM_COL32_A_MASK)|(alpha<<IM_COL32_A_SHIFT); }
 }
 }

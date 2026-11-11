@@ -6,6 +6,7 @@
 #include "camera_picker.hpp"
 #include "errors.hpp"
 #include "level_watch.hpp"
+#include "grid_stability.hpp"
 #include <string>
 #include <vector>
 #include <memory>
@@ -31,6 +32,7 @@ class GameGridReader {
  uint32_t sceneLatestFrame=0,scenePriorFrame=0;float sceneLatestTime=0,scenePriorTime=0;
  size_t sceneReads=0,sceneMatches=0,sceneFresh=0;
  LevelIdentity pickerLevel;bool picking=false;
+ bool settleCamera=false;GridStability stability;
  uintptr_t image=0,manager=0,managerRva=GameLayouts[0].managerRva;bool checked=false,supported=false,heightOverride=false,rejectedCameraOrientation=false;
  float width=0,height=0,forcedZ=1;uint64_t started=0,lastScan=0;
  CameraScanStats scanStats;
@@ -38,6 +40,7 @@ class GameGridReader {
  CameraDiagnostics cameraDiagnostics;uint64_t requestSerial=0;bool levelValidated=false,planeSelected=false;
  std::string scanDiagnostic()const;
  bool readLevel();void scan();bool verifyBuild();
+ GameGridState pollCandidate(Grid& grid);
  void observeCamera(uintptr_t address,const CameraFrame& frame,CameraStage stage);
  void rememberCandidate(Candidate candidate);
  void captureCameras(bool early);bool localizationContext();

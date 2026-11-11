@@ -18,6 +18,8 @@ struct GameGridReaderTestAccess {
  static void append(GameGridReader& reader,CameraFrame* camera){reader.candidates.push_back({reinterpret_cast<uintptr_t>(camera),camera->frame(),camera->f[211]});}
  static void sceneImage(GameGridReader& reader,uintptr_t image,CameraFrame* camera,uintptr_t managerRva){reader.managerRva=managerRva;reader.checked=true;reader.supported=true;reader.image=image;reader.candidates={{reinterpret_cast<uintptr_t>(camera),camera->frame(),camera->f[211]}};}
  static void preferOriginal(GameGridReader& reader){reader.preferScene=false;}
+ static void settle(GameGridReader& reader){reader.settleCamera=true;reader.preferScene=true;}
+ static void elapsed(GameGridReader& reader,uint64_t ms){reader.started=GetTickCount64()-ms;reader.lastScan=GetTickCount64();}
  static void finishCollection(GameGridReader& reader){reader.started=GetTickCount64()-GameGridReader::PickCollectMs;}
  static void timeout(GameGridReader& reader){reader.started=GetTickCount64()-1801;}
  static void expireCapture(GameGridReader& reader){reader.capturedAt=GetTickCount64()-GameGridReader::CaptureLifetimeMs-1;}
@@ -89,6 +91,32 @@ void checkSceneCameraReaderFixture(uintptr_t image,CameraFrame* raw,const SceneC
  GameGridReaderTestAccess::sceneImage(reader,image,raw,managerRva);GameGridReaderTestAccess::preferOriginal(reader);
  assert(reader.begin(3840,2160,false,1)&&reader.poll(grid)==GameGridState::Waiting);
  GameGridReaderTestAccess::timeout(reader);assert(reader.poll(grid)==GameGridState::Preview&&reader.error==ErrorId::None&&reader.pickerOptions()[0].scenePose);
+ // Level entry: never publish the first usable moving pose or a retained
+ // snapshot across a failed read. Publish the final pose after convergence.
+ *raw={};GameGridReaderTestAccess::settle(reader);assert(reader.begin(3840,2160,false,1));
+ auto position=reinterpret_cast<float*>(*reinterpret_cast<uintptr_t*>(image+managerRva)+0x3d98);float original=position[0];
+ for(uint64_t t=0;t<=1200;t+=100){position[0]=original+float(std::min(t,uint64_t(1000)))*.0001f;GameGridReaderTestAccess::elapsed(reader,t);assert(reader.poll(grid)==GameGridState::Waiting);}
+ orientation[0]=NAN;GameGridReaderTestAccess::elapsed(reader,1300);assert(reader.poll(grid)==GameGridState::Waiting&&reader.pickerOptions().empty());orientation[0]=saved;
+ for(uint64_t t=1400;t<=2100;t+=100){GameGridReaderTestAccess::elapsed(reader,t);assert(reader.poll(grid)==GameGridState::Waiting);}
+ GameGridReaderTestAccess::elapsed(reader,2200);assert(reader.poll(grid)==GameGridState::Preview);
+ assert(reader.pickerOptions()[0].pose.position[0]==position[0]);
+ GameGridReaderTestAccess::elapsed(reader,8000);assert(reader.poll(grid)==GameGridState::Unavailable&&reader.error==ErrorId::CameraUnsettled);
+ // Explicit picker keeps direct preview adoption and does not inherit settling.
+ assert(reader.beginPicking(3840,2160,1));GameGridReaderTestAccess::finishCollection(reader);assert(reader.pollPicking()==GameGridState::Ready);
+ position[0]=original;
+ // Both strict and recovery stack projections can converge without a scene
+ // source. A previously fresh stack snapshot cannot fill a later empty round.
+ *code^=1;
+ for(bool recovery:{false,true}){
+  *raw=gameCameraFixture();if(recovery)std::fill(raw->f.begin()+176,raw->f.begin()+192,0.f);
+  GameGridReaderTestAccess::sceneImage(reader,image,raw,managerRva);GameGridReaderTestAccess::settle(reader);
+  assert(reader.begin(3840,2160,true,1));
+  for(uint64_t t=0;t<=1200;t+=100){next=raw->frame()+1;std::memcpy(raw->f.data()+225,&next,4);raw->f[211]+=.016f;GameGridReaderTestAccess::elapsed(reader,t);
+   auto state=reader.poll(grid);assert(state==(t<1200?GameGridState::Waiting:recovery?GameGridState::Preview:GameGridState::Ready));
+  }
+  GameGridReaderTestAccess::elapsed(reader,1300);assert(reader.poll(grid)==GameGridState::Waiting&&reader.pickerOptions().empty());
+ }
+ *code^=1;
 }
 void checkAdvisoryBuild(){
  struct Type{uint32_t tag=7,pad=0;int64_t size=1320,count=8;uintptr_t data=0;};

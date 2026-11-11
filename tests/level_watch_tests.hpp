@@ -14,8 +14,10 @@ struct LevelMemoryFixture {
 inline void checkLevelWatch(){
  using Memory=LevelMemoryFixture;
  assert(!knownGameLayout("")&&!knownGameLayout("d802098b"));
+ assert(std::string(gameLayoutName(0))=="unknown");
  LevelIdentity a;
  for(const auto& layout:GameLayouts){assert(knownGameLayout(layout.sha256)==&layout);
+ assert(std::string(gameLayoutName(layout.managerRva))==layout.name);
  auto fixture=[&](){Memory m;m.managerRva=layout.managerRva;uintptr_t manager=0x200000,entity=0x300000,type=0x400000,list=0x210000,typenameAt=0x410000,nameAt=0x420000;
   m.zero(manager+0xdd0,24);m.zero(entity,1320);m.zero(type,32);m.put(uintptr_t(0x100000+m.managerRva),manager);
   m.put(manager+0xdd0,int64_t(1));m.put(manager+0xdd8,list);m.put(manager+0xde0,int64_t(1));m.put(list,entity);

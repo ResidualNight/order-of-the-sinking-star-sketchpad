@@ -43,7 +43,7 @@ static void wheelTests(){Context context;App a;open(a);a.padCursor={700,400};rt(
  a.grid.valid=true;a.grid.origin={300,200};a.grid.u={60,0};a.grid.v={0,60};a.gridEnabled=a.gridConfirmed=true;
  selectWheel(a,5);assert(a.tint&&a.monochromeTint&&a.gridConfirmed);selectWheel(a,5);assert(!a.tint&&a.monochromeTint);
  auto encoded=encodePreferences(a);App restored;assert(decodePreferences(encoded,restored)&&restored.monochromeTint&&!restored.padWheel);assert(!decodePreferences("format=1\ntint.monochrome=2\n",restored));
- selectWheel(a,6);assert(a.gridEnabled&&!a.gridConfirmed&&a.document.marks.size()==count);a.gridRefresh.cancel();
+ a.gridLevelSettling=true;selectWheel(a,6);assert(!a.gridLevelSettling&&a.gridEnabled&&!a.gridConfirmed&&a.document.marks.size()==count);a.gridRefresh.cancel();
  // Center/B cancellation, disconnect, resize and closed session never execute.
  holdWheel(a,4);frame(a,wheelInput(-1));frame(a);frame(a);assert(a.document.marks.size()==count);
  holdWheel(a,4);auto cancel=wheelInput(4);cancel.buttons|=padui::B;frame(a,cancel);frame(a);frame(a);assert(!a.padWheel&&a.editing&&a.document.marks.size()==count);
@@ -54,4 +54,16 @@ static void wheelTests(){Context context;App a;open(a);a.padCursor={700,400};rt(
  for(int i=0;i<7;++i){auto in=wheelInput(i);assert(padui::wheelSelection(in.lx,in.ly)==i);}
  assert(padui::wheelSelection(.1f,.1f)==-1);float edge=3.14159265f/7;assert(padui::wheelSelection(std::sin(edge+.02f),std::cos(edge+.02f),0)==0);assert(padui::wheelSelection(std::sin(edge+.12f),std::cos(edge+.12f),0)==1);
 }
-int main(){wheelTests();movement();tools();lifecycle();layout();navigation();std::puts("controller UI: tools/history, two-point arrow, grouped numbering/erase, menu guards, disconnect/rearm, mode/preferences, projected stepping seven layouts and radial hold/release/actions/cancellation passed");}
+static void wheelStyle(){Context context;App a;open(a);assert(a.padWheelScale==.8f&&a.padWheelOpacity==1);
+ for(auto size:{ImVec2(640,360),ImVec2(1280,720),ImVec2(1920,1080),ImVec2(2560,1600),ImVec2(3440,1440),ImVec2(3840,2160),ImVec2(5120,1440)}){
+  float scale=std::clamp(size.y/1080.f,.75f,2.4f),old=std::min({175.f*scale,size.y*.31f,size.x*.4f});
+  assert(std::abs(padui::wheelRadius(size.x,size.y,scale,.8f)-old*.8f)<.001f);
+  for(float factor:{.5f,.8f,1.f,1.5f}){float r=padui::wheelRadius(size.x,size.y,scale,factor);assert(r<=size.y*.31f+.01f&&r<=size.x*.4f+.01f);}
+ }
+ a.padWheelScale=1.25f;a.padWheelOpacity=.4f;auto saved=encodePreferences(a);App restored;assert(decodePreferences(saved,restored)&&restored.padWheelScale==1.25f&&restored.padWheelOpacity==.4f);
+ assert(decodePreferences("format=1\n",restored)&&restored.padWheelScale==.8f&&restored.padWheelOpacity==1);
+ for(auto invalid:{"pad.wheel_scale=0.4","pad.wheel_scale=1.6","pad.wheel_scale=nan","pad.wheel_opacity=0.2","pad.wheel_opacity=1.1"}){auto before=encodePreferences(a);assert(!decodePreferences(std::string("format=1\n")+invalid+"\n",a));assert(encodePreferences(a)==before);}
+ holdWheel(a,2);auto dl=ImGui::GetForegroundDrawList();assert(dl->VtxBuffer.Size>0);unsigned alpha=(dl->VtxBuffer[0].col>>IM_COL32_A_SHIFT)&255;assert(alpha==45);
+ a.padWheelOpacity=1;frame(a,wheelInput(2));dl=ImGui::GetForegroundDrawList();assert(((dl->VtxBuffer[0].col>>IM_COL32_A_SHIFT)&255)==112);
+}
+int main(){wheelStyle();wheelTests();movement();tools();lifecycle();layout();navigation();std::puts("controller UI: tools/history, two-point arrow, grouped numbering/erase, menu guards, disconnect/rearm, mode/preferences, projected stepping seven layouts and radial hold/release/actions/cancellation passed");}

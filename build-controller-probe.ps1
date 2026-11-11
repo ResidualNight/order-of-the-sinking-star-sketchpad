@@ -28,6 +28,12 @@ if($GameExecutable){
  & (Join-Path $out 'gamepad_cache_tests.exe') $GameExecutable --clean-remove
 }else{& (Join-Path $out 'gamepad_cache_tests.exe')}
 if($LASTEXITCODE){throw 'Cached bridge tests failed'}
+if($GameExecutable){
+ & (Join-Path $out 'gamepad_cache_tests.exe') $GameExecutable --new-profile
+ if($LASTEXITCODE){throw 'New cached bridge tests failed'}
+ & (Join-Path $out 'gamepad_cache_tests.exe') $GameExecutable --new-profile-clean
+ if($LASTEXITCODE){throw 'New cached bridge removal failed'}
+}
 & $compiler @common (Join-Path $root 'tests\gamepad_entry_tests.cpp') -o (Join-Path $out 'gamepad_entry_tests.exe')
 if($LASTEXITCODE){throw 'Trigger entry compile failed'}
 & (Join-Path $out 'gamepad_entry_tests.exe')

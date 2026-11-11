@@ -30,7 +30,7 @@ void GameGridWorker::cancel(){
  service->pending.reset();active.reset();
 }
 void GameGridWorker::cancelPicking(){if(active&&active->picking)cancel();}
-bool GameGridWorker::start(float w,float h,bool overrideHeight,float z,bool picking,bool preferScene){
+bool GameGridWorker::start(float w,float h,bool overrideHeight,float z,bool picking,bool preferScene,bool settleCamera){
  cancel();++serial;options.clear();details.clear();error=ErrorId::None;directionCategory=0;diagnostic="waiting_for_fresh_camera_frame";
  levelReader.verifyBuild();
  // Bind the queued request to the level the UI actually requested. These
@@ -46,6 +46,7 @@ bool GameGridWorker::start(float w,float h,bool overrideHeight,float z,bool pick
  auto& reader=session->reader;reader.checked=levelReader.checked;reader.supported=levelReader.supported;reader.image=levelReader.image;reader.managerRva=levelReader.managerRva;
  reader.requestSerial=serial-1;reader.scanIntervalMs=50;reader.scanOwnThread=false;
  reader.preferScene=preferScene;
+ reader.settleCamera=settleCamera&&!picking;
  reader.candidates=levelReader.candidates;
  std::lock_guard<std::mutex> lock(service->mutex);
  active=session;service->pending=session;
@@ -81,13 +82,13 @@ void GameGridWorker::run(const std::shared_ptr<Service>& service){
     while(session->state==GameGridState::Waiting&&!session->cancelled.load()){
      session->state=session->picking?reader.pollPicking():reader.poll(session->grid);
      // Vary the small delay so polling is not locked to a display refresh phase.
-     if(session->state==GameGridState::Waiting)Sleep(DWORD(3+(polls++%3)));
+     if(session->state==GameGridState::Waiting)Sleep(reader.settleCamera?50:DWORD(3+(polls++%3)));
     }
     if(session->state==GameGridState::Ready||session->state==GameGridState::Preview)session->options=reader.pickerOptions();
    }
   }catch(...){reader.fail(ErrorId::CameraWorkerUnavailable);session->state=GameGridState::Unavailable;}
   if(!session->cancelled.load()){
-   try{session->details=reader.failureDetails();session->details.push_back("sampling=background scan_interval_ms=50 poll_delay_ms=3..5");}
+   try{session->details=reader.failureDetails();session->details.push_back(std::string("sampling=background scan_interval_ms=50 level_camera_settle=")+(reader.settleCamera?"1 poll_delay_ms=50 minimum_ms=1200 stable_ms=750 tolerance_px=1 timeout_ms=8000":"0 poll_delay_ms=3..5"));}
    catch(...){reader.fail(ErrorId::CameraWorkerUnavailable);session->state=GameGridState::Unavailable;}
    // The worker never touches this reader after publication. Cancelled or
    // replaced sessions are never delivered to the UI.
@@ -109,6 +110,9 @@ GameGridState GameGridWorker::result(bool picking,Grid* grid){
  // original 250ms lifetime; displayed manual previews still adopt directly.
  if(!reader.localizationContext()){
   error=reader.error;diagnostic=reader.diagnostic;details=reader.failureDetails();return GameGridState::Unavailable;
+ }
+ if(reader.settleCamera&&GetTickCount64()-reader.started-reader.stability.last>GameGridReader::CaptureLifetimeMs){
+  fail(ErrorId::CameraUnsettled);details.push_back("level_camera_settle_delivery_expired=1");return GameGridState::Unavailable;
  }
  if(!picking&&active->state==GameGridState::Ready&&GetTickCount64()-reader.capturedAt>GameGridReader::CaptureLifetimeMs){
   // The automatic lifetime is unchanged. A validated captured snapshot may

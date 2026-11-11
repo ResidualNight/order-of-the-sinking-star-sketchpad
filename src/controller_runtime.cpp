@@ -31,7 +31,7 @@ void poll(App&app,bool foreground){
  else if(result==ERROR_RETRY)input=last;
  else{last={};if(!app.editing)selected=false;}
  app.padPrepare(input);
- auto status=pad::stats();char text[256];std::snprintf(text,sizeof(text),"Controller preview 6 | slot %u | game queries %llu | endpoints %u | filtered %llu%s",slot,static_cast<unsigned long long>(status.gameCalls),status.endpoints,static_cast<unsigned long long>(status.neutralized),status.degraded?" | [SS-INPUT-004] unavailable":"");app.padStatus=text;
+ auto status=pad::stats();char text[256];std::snprintf(text,sizeof(text),"Controller preview 7 | slot %u | game queries %llu | endpoints %u | filtered %llu%s",slot,static_cast<unsigned long long>(status.gameCalls),status.endpoints,static_cast<unsigned long long>(status.neutralized),status.degraded?" | [SS-INPUT-004] unavailable":"");app.padStatus=text;
  if(status.degraded&&app.padPointer){app.setEditing(false);app.padPointer=false;app.status="[SS-INPUT-004] 手柄输入不可用，请使用键鼠操作";}
  synchronize(app,foreground);
 }

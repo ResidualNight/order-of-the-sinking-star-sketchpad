@@ -37,7 +37,7 @@ bool App::setEditing(bool enabled){
   padLayout=padUiMode==2||(padUiMode==0&&padOpening);padPointer=padOpening;padReady=false;padQuick=false;padConfirmClear=false;padEraseTool=false;
   if(padOpening&&!padUsed){tool=Kind::Pin;padUsed=true;}padOpening=false;
   if(gridPinned&&grid.usable()){gridConfirmed=!levelPaused;status=levelPaused?"等待关卡确认，暂时保留当前网格":"已保留本次采用的网格与吸附";}
-  else requestGrid();
+  else if(!gridRefresh.requested)requestGrid();
  }
  else{resetPadGesture();padQuick=false;padConfirmClear=false;finishGesture();cancelGesture();cancelCameraPicker();reportOpen=false;settingsOpen=false;capturingBinding=-1;captureKey=ImGuiKey_None;}
  return true;
@@ -48,7 +48,7 @@ void App::requestGrid(bool resized){
  gridRecoveryActive=gridRecoveryScene=false;
  recoveryOption.reset();recoveryAspect=recoveryFit=0;
  gridConfirmed=gridPinned=false;grid.valid=false;gridFromGame=false;gridDirectionPending=false;gridRefresh.request(resized);
- status=resized?"画面尺寸已变化，等待稳定后自动定位网格":"正在按游戏数据定位网格";
+ status=gridLevelSettling?"正在等待切关相机稳定，随后自动定位并启用吸附":resized?"画面尺寸已变化，等待稳定后自动定位网格":"正在按游戏数据定位网格";
 }
 void App::resize(float w,float h){
  if(!std::isfinite(w)||!std::isfinite(h)||w<=0||h<=0)return;
@@ -70,7 +70,7 @@ bool App::observeLevel(const LevelIdentity* identity,uint64_t now){
  bool changed=levelWatch.observe(identity,now);
  if(changed){
   finishGesture();cancelGesture();if(autoClearOnLevel)document.clear();
-  levelPaused=false;requestGrid();
+  levelPaused=false;gridLevelSettling=true;requestGrid();
   status=autoClearOnLevel?"已切换关卡，标注已清除，编号从 1 开始；可撤销":"已切换关卡，按设置保留标注，正在重新定位网格";
  }else if(levelWatch.transitioning()){
   if(!levelPaused){finishGesture();cancelGesture();cancelCameraPicker();gridConfirmed=false;gridFromGame=false;gridDirectionPending=false;gridRefresh.cancel();levelPaused=true;}
@@ -84,7 +84,7 @@ void App::acceptGameGrid(const Grid& result,int category,float width,float heigh
  gridRecoveryActive=gridRecoveryScene=false;
  recoveryOption.reset();
  if(!result.usable()||category<0||category>=int(gridDirections.size())||!std::isfinite(width)||!std::isfinite(height)||width<=0||height<=0){rejectGameGrid(ErrorId::ProjectedGridInvalid);return;}
- finishGesture();cancelGesture();cancelCameraPicker(false);gridRefresh.finish();gridPinned=false;
+ finishGesture();cancelGesture();cancelCameraPicker(false);gridRefresh.finish();gridPinned=false;gridLevelSettling=false;
  gameGridBase=result;gridOutputWidth=width;gridOutputHeight=height;gridDirectionCategory=category;gridPlaneZ=planeZ;gridFromGame=true;
  int saved=gridDirections[category];gridDirection=saved>=0?saved:0;
  grid=result.reflected(width,height,(gridDirection&1)!=0,(gridDirection&2)!=0);
@@ -142,6 +142,7 @@ void App::acceptCameraRecoveryOptions(const std::vector<CameraOption>& options,f
  finishGesture();cancelGesture();gridRefresh.finish();
  for(const auto& option:options){auto preview=cameraOptionGrid(option,width,height,option.suggestedZ,0);if(!preview.usable())continue;
   grid=preview;gridConfirmed=gridPinned=gridEnabled=true;gridFromGame=gridDirectionPending=false;
+  gridLevelSettling=false;
   gridRecoveryActive=true;gridRecoveryScene=option.scenePose;
   recoveryOption=std::make_unique<CameraOption>(option);recoveryAspect=recoveryFit=0;
   gridOutputWidth=width;gridOutputHeight=height;
@@ -168,7 +169,7 @@ bool App::adoptCameraPreview(){
  auto preview=cameraPickerPreview();if(!preview.usable())return false;
  finishGesture();cancelGesture();cancelCameraPicker(false);grid=preview;gridPinned=true;gridConfirmed=!levelPaused;gridEnabled=true;
  gridFromGame=false;gridDirectionPending=false;gridRefresh.cancel();
- ++cameraPreviewAdoptions;
+ gridLevelSettling=false;++cameraPreviewAdoptions;
  status=levelPaused?"已采用当前预览，等待关卡确认后恢复吸附":"已采用当前预览，网格与吸附已保留";return true;
 }
 void App::failCameraPicker(ErrorId error){
@@ -305,7 +306,7 @@ void App::panel(){float s=uiScale;ImGui::SetNextWindowPos({18*s,22*s},ImGuiCond_
  if(row("grid",bindings.label(Action::Grid).c_str(),"网格与吸附",gridEnabled)){gridEnabled=!gridEnabled;if(gridEnabled&&!gridConfirmed&&!gridRecoveryActive&&!gridDirectionPending&&!cameraPickerOpen&&!levelPaused)requestGrid();}
  if(row("tint",bindings.label(Action::Tint).c_str(),"棋盘染色",tint)){tint=!tint;if(tint&&!gridConfirmed&&!gridRecoveryActive&&!gridDirectionPending&&!cameraPickerOpen&&!levelPaused)requestGrid();}
  if(row("cameraPicker",bindings.label(Action::Calibrate).c_str(),"临时选择相机",cameraPickerOpen))startCameraPicker();
- if(ImGui::Button("重新识别",{137*s,29*s})){requestGrid();gridEnabled=true;}ImGui::SameLine();if(ImGui::Button(("退出绘画  "+bindings.label(Action::Toggle)).c_str(),{137*s,29*s}))wantExit=true;
+ if(ImGui::Button("重新识别",{137*s,29*s}))requestImmediateGrid();ImGui::SameLine();if(ImGui::Button(("退出绘画  "+bindings.label(Action::Toggle)).c_str(),{137*s,29*s}))wantExit=true;
  if(gridEnabled&&grid.usable()&&!gridConfirmed&&!gridDirectionPending&&!cameraPickerOpen&&!levelPaused){if(ImGui::Button("采用候选网格",{0,29*s})){gridRefresh.cancel();gridConfirmed=true;status="已采用候选网格，可继续精调";}}
  gridTuningPanel();
  ImGui::Spacing();ImGui::Separator();

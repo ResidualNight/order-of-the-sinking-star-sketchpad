@@ -120,7 +120,7 @@ void App::padPanel(float w,float h){
   ImGui::SetNextWindowPos({12*s,12*s},ImGuiCond_Always);ImGui::SetNextWindowSize({std::min(w-24*s,540*s),0});
   ImGui::Begin("##PadStatus",nullptr,ImGuiWindowFlags_NoTitleBar|ImGuiWindowFlags_NoResize|ImGuiWindowFlags_NoMove|ImGuiWindowFlags_NoSavedSettings|ImGuiWindowFlags_NoNavFocus|ImGuiWindowFlags_AlwaysAutoResize);
   auto notice=updateNotice(availableUpdate);if(!notice.empty())ImGui::TextColored({.43f,.89f,.56f,1},"%s",notice.c_str());
-  ImGui::Text("手柄预览 6 · %s · 吸附 %s",tools[padEraseTool?4:int(tool)],snappingReady()?"已就绪":"未启用");
+  ImGui::Text("手柄预览 7 · %s · 吸附 %s",tools[padEraseTool?4:int(tool)],snappingReady()?"已就绪":"未启用");
   ImGui::ColorButton("当前颜色",ImGui::ColorConvertU32ToFloat4(selectedColor()),ImGuiColorEditFlags_NoTooltip,{20*s,14*s});ImGui::SameLine();ImGui::Text("笔宽 %.1f · 下个编号 %d",penWidth,document.nextNumber);
   if(!padInput.connected)ImGui::TextWrapped("手柄已断开，可用鼠标继续操作。");
   if(!status.empty())ImGui::TextWrapped("%s",status.c_str());
@@ -153,7 +153,7 @@ void App::padPanel(float w,float h){
   if(ImGui::Checkbox("网格与吸附",&gridEnabled)&&gridEnabled&&!gridConfirmed&&!gridRecoveryActive&&!gridDirectionPending&&!levelPaused)requestGrid();
   if(ImGui::Checkbox("棋盘染色",&tint)&&tint&&!gridConfirmed&&!gridRecoveryActive&&!gridDirectionPending&&!levelPaused)requestGrid();
   ImGui::SliderFloat("染色透明度",&tintOpacity,.04f,.5f,"%.2f",ImGuiSliderFlags_NoInput);
-  if(ImGui::Button("重新识别网格")){requestGrid();gridEnabled=true;}
+  if(ImGui::Button("重新识别网格")){requestImmediateGrid();}
   if(ImGui::Button("临时选择相机")){padQuick=false;resetPadGesture();startCameraPicker();}
   gridTuningPanel();
  }else{
@@ -161,6 +161,11 @@ void App::padPanel(float w,float h){
   ImGui::Checkbox("LT + RT 打开草稿纸",&padEntryEnabled);
   ImGui::TextWrapped("两个扳机在 180ms 内一起压下即打开；单独扳机增加约 180ms 等待。不需要按下摇杆。");
   ImGui::SliderFloat("光标速度",&padSpeed,.25f,3.f,"%.2f",ImGuiSliderFlags_NoInput);
+  float wheelSize=padWheelScale*100,transparency=(1-padWheelOpacity)*100;
+  if(ImGui::SliderFloat("轮盘大小",&wheelSize,50,150,"%.0f%%",ImGuiSliderFlags_NoInput))padWheelScale=wheelSize/100;
+  if(ImGui::SliderFloat("轮盘透明度",&transparency,0,75,"%.0f%%",ImGuiSliderFlags_NoInput))padWheelOpacity=1-transparency/100;
+  ImGui::TextWrapped("默认大小 80%%；透明度越高越通透。小窗口会自动限制轮盘大小。");
+  if(ImGui::Button("恢复轮盘默认")){padWheelScale=.8f;padWheelOpacity=1;}
   ImGui::Checkbox("切换关卡自动清除标注",&autoClearOnLevel);
   if(ImGui::Button(padLayout?"本次切换到键鼠界面":"本次切换到手柄界面")){resetPadGesture();padLayout=!padLayout;padQuick=false;}
   ImGui::TextWrapped("左摇杆移动，右摇杆微调；方向键逐格移动。箭头用两次 RT 定起点和终点，B 取消。自由画笔按住 RT 绘制。");

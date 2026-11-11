@@ -3,6 +3,7 @@
 #include "scene_camera.hpp"
 #include "camera_picker.hpp"
 #include "camera_fixture.hpp"
+#include "game_layout.hpp"
 #include <cassert>
 #include <fstream>
 #include <iostream>
@@ -26,7 +27,7 @@ struct Fixture {
  uintptr_t base()const{return reinterpret_cast<uintptr_t>(image.data());}
  uintptr_t root()const{return reinterpret_cast<uintptr_t>(manager.data());}
  SceneCameraPose pose=fixturePose();
- Fixture(bool updated=false){
+ Fixture(int profile=0){
   IMAGE_DOS_HEADER dos{};dos.e_magic=IMAGE_DOS_SIGNATURE;dos.e_lfanew=0x80;put(image,0,dos);
   IMAGE_NT_HEADERS64 nt{};nt.Signature=IMAGE_NT_SIGNATURE;nt.FileHeader.Machine=IMAGE_FILE_MACHINE_AMD64;nt.FileHeader.NumberOfSections=2;
   nt.FileHeader.SizeOfOptionalHeader=sizeof(IMAGE_OPTIONAL_HEADER64);nt.OptionalHeader.Magic=IMAGE_NT_OPTIONAL_HDR64_MAGIC;nt.OptionalHeader.SizeOfImage=DWORD(image.size());put(image,0x80,nt);
@@ -57,7 +58,7 @@ struct Fixture {
   put(manager,0xdd0,Array{1,base()+0xb00400,1});put(image,0xb00400,base()+0xb01000);put(image,0xb01000+240,root());put(image,0xb01000+256,uint32_t(8));
   put(image,0xb01000+264,base()+0xb00500);put(image,0xb00500,Type{7,0,1320,8,base()+0xb00600});std::memcpy(image.data()+0xb00600,"Settings",8);
   put(image,0xb01000+816,Geometry{8,7,56,0,{},{}});put(image,0xb01000+1296,int64_t(7));put(image,0xb01000+1304,base()+0xb00700);std::memcpy(image.data()+0xb00700,"fixture",7);
-  if(updated){
+  if(profile==1){
    pattern(image,Gate,{0x49,0x8d,0xac,0x24,0x98,0x3d,0,0,0x48,0x8b,0x05,0,0,0,0,0x48,0x85,0xc0,0x0f,0x84,0,0,0,0,0x48,0x83,0xf8,1,0x0f,0x85,0,0,0,0});
    put(image,Gate+11,int32_t(Mode-Gate-15));put(image,Gate+20,int32_t(Normal-Gate-24));put(image,Gate+30,int32_t(Frozen-Gate-34));
    pattern(image,Normal,{0x4c,0x89,0x74,0x24,0,0x49,0x83,0xbc,0x24,0x38,5,0,0,0,0x0f,0x8e,0,0,0,0});
@@ -65,6 +66,11 @@ struct Fixture {
    pattern(image,Normal+70,{0x49,0x8b,0x84,0x24,0x40,5,0,0,0x4a,0x8b,0x1c,0xf8});
    pattern(image,Frozen-19,{0x41,0x0f,0x13,0x84,0x24,0x98,0x3d,0,0,0xf3,0x41,0x0f,0x11,0x94,0x24,0xa0,0x3d,0,0,0x49,0x8b,0x04,0x24,0x48,0x83,0xc0,0xfb,0x48,0x83,0xf8,0x14,0x0f,0x87,0,0,0,0});
    put(image,Link+3,int32_t(0xb68618-Link-7));put(image,0xb69600,uintptr_t(0));put(image,0xb68618,root());
+  }else if(profile==2){
+   put(image,Normal+60,uint32_t(0x538));image[Normal+69]=0xcc;
+   pattern(image,Normal+70,{0x49,0x8b,0x85,0x40,5,0,0,0x4a,0x8b,0x1c,0xf8});
+   put(image,Link+3,int32_t(0xb744d0-Link-7));put(image,0xb69600,uintptr_t(0));put(image,0xb744d0,root());
+   put(image,Gate+10,int32_t(0xb75848-Gate-14));
   }
  }
 };
@@ -75,7 +81,7 @@ void verifyFile(const char* filename){
  std::vector<unsigned char> mapped(nt->OptionalHeader.SizeOfImage);std::memcpy(mapped.data(),bytes.data(),nt->OptionalHeader.SizeOfHeaders);
  auto sections=IMAGE_FIRST_SECTION(nt);for(unsigned i=0;i<nt->FileHeader.NumberOfSections;++i){const auto& s=sections[i];assert(size_t(s.PointerToRawData)+s.SizeOfRawData<=bytes.size()&&size_t(s.VirtualAddress)+s.SizeOfRawData<=mapped.size());std::memcpy(mapped.data()+s.VirtualAddress,bytes.data()+s.PointerToRawData,s.SizeOfRawData);}
  SceneCameraReader reader;auto base=reinterpret_cast<uintptr_t>(mapped.data());
- assert(reader.discover(readMemory,base)||reader.discover(readMemory,base,0xb68618));
+ bool found=false;for(const auto& layout:GameLayouts)if(reader.discover(readMemory,base,layout.managerRva)){found=true;break;}assert(found);
  assert(reader.discovered().position==0x3d98&&reader.discovered().orientation==0x3db0&&reader.discovered().projection==0x3dc0);
  std::cout<<"PASS: real game PE signature/field cross-check (offline data only)\n";
 }
@@ -156,6 +162,16 @@ void checkSceneCamera(const char* filename){
  std::memcpy(updated->image.data()+0x1a00,updated->image.data()+Fixture::Gate,34);assert(!reader.discover(readMemory,updated->base(),0xb68618));std::fill(updated->image.begin()+0x1a00,updated->image.begin()+0x1a22,0xcc);
  camera=gameCameraFixture();checkSceneCameraReaderFixture(updated->base(),&camera,pose,0xb68618);
  camera=gameCameraFixture();checkSceneCameraWorker(updated->base(),&camera,0xb68618);
+ auto latest=std::make_unique<Fixture>(2);
+ assert(!reader.discover(readMemory,latest->base())&&!reader.discover(readMemory,latest->base(),0xb68618));
+ assert(reader.discover(readMemory,latest->base(),0xb744d0)&&reader.sample(readMemory,latest->root(),result));
+ assert(reader.discovered().mode==latest->base()+0xb75848&&reader.discovered().evidence.size()==6);
+ for(const auto& e:reader.discovered().evidence)for(size_t i=0;i<e.bytes.size();++i){auto at=e.address-latest->base()+i;latest->image[at]^=1;assert(!reader.sample(readMemory,latest->root(),result));latest->image[at]^=1;}
+ put(latest->image,Fixture::Normal+60,uint32_t(0x540));assert(!reader.discover(readMemory,latest->base(),0xb744d0));put(latest->image,Fixture::Normal+60,uint32_t(0x538));
+ latest->image[Fixture::Normal+80]^=1;assert(!reader.discover(readMemory,latest->base(),0xb744d0));latest->image[Fixture::Normal+80]^=1;
+ std::memcpy(latest->image.data()+0x1a00,latest->image.data()+Fixture::Gate,33);assert(!reader.discover(readMemory,latest->base(),0xb744d0));std::fill(latest->image.begin()+0x1a00,latest->image.begin()+0x1a21,0xcc);
+ camera=gameCameraFixture();checkSceneCameraReaderFixture(latest->base(),&camera,pose,0xb744d0);
+ camera=gameCameraFixture();checkSceneCameraWorker(latest->base(),&camera,0xb744d0);
  verifyFile(filename);
  std::cout<<"PASS: scene pose projection vs captured matrix, source/map guards, six code proofs, layout ambiguity/conflicts and original fallback\n";
 }
