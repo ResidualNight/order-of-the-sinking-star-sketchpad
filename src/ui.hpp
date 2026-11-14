@@ -9,7 +9,7 @@
 #include "camera_picker.hpp"
 #include "feedback.hpp"
 #include "imgui.h"
-#include "gamepad_ui.hpp"
+#include "pad_bindings.hpp"
 #include <string>
 #include <set>
 #include <memory>
@@ -21,9 +21,12 @@ public:
  bool padNavBusy=false;bool padLayout=false,padOpening=false,padUsed=false,padPointer=false,padReady=false,padQuick=false,padEraseTool=false,padConfirmClear=false;
  bool padWheel=false,padWheelVisible=false;int padWheelSelection=-1;double padWheelStarted=0;
  int padPage=0;PadInput padInput{};uint16_t padPrevious=0,padPressed=0;
- bool padRt=false,padLt=false,padRtPrevious=false;Point padCursor{};
+ bool padRt=false,padLt=false,padRtPrevious=false,padEraseConnected=false;Point padCursor{};
  float padWidth=0,padHeight=0;double padRepeatAt=0;uint16_t padDirection=0;
- std::string padStatus;
+ std::string padStatus,padBindingStatus; PadBindings padBindings; uint32_t padHeld=0,padHeldPrevious=0;
+ bool padDown(PadAction a)const{return (padHeld&padControlBit(padBindings.get(a)))!=0;}
+ bool padHit(PadAction a)const{return ((padHeld&~padHeldPrevious)&padControlBit(padBindings.get(a)))!=0;}
+ void padBindingsPanel();bool assignPadBinding(PadAction action,PadControl control);
  bool padMenu()const{return padWheel||padQuick||settingsOpen||cameraPickerOpen||reportOpen;}
  void openFromPad();void resetPadGesture();void padPrepare(const PadInput& input);
  void padActions(float width,float height);void padPanel(float width,float height);void padCanvas(float width,float height);

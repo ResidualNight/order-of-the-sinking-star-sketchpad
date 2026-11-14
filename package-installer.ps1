@@ -52,6 +52,10 @@ $known=@(($known+'af0eb90888d19b41dcb0913ddba8d2ef7ee8128500eafeca2a5d3edf26dc31
 $known=@(($known+'4830c6b1f77aeb4171b9156cb29c2f89af43d53036e01167d9132c6674ed6d95') | Sort-Object -Unique)
 $known=@(($known+'90f1c4360e624a6ddf09f22134b1ebc98b0d5194da763d6e227ba4536e7a24b6') | Sort-Object -Unique)
 $known=@(($known+'e904d71514b340d026a530799051d3eafe5b502c31bc9c782694541103a10dd0') | Sort-Object -Unique)
+$known=@(($known+'74409d5cc6f0e0e44bb839adfdb1e9c5d80b1eadda45e6ca3a5c05eaa87d4d5f') | Sort-Object -Unique)
+$known=@(($known+'f60178573aca63d04abcf37cd2412c6f60e30beb1feb9acbf0c0d91ad9be1302') | Sort-Object -Unique)
+$known=@(($known+'19ddca5a00d4b8d40e59134bfee90f15748d73df42feb1848bbd17aaa62a695c') | Sort-Object -Unique)
+$known=@(($known+'bb0417af75097d430a47c24657e479862820b9ee2b74a178f83db556b9675a12') | Sort-Object -Unique)
 $package=[ordered]@{product='StarSketch';schema=1;version=$Version;known_dll_sha256=@($known);game_exe_sha256=$runtime.game_exe_sha256;files=$files}
 [IO.File]::WriteAllText((Join-Path $payload 'StarSketch-package.json'),($package | ConvertTo-Json -Depth 6),[Text.UTF8Encoding]::new($false))
 foreach($name in @('StarSketch-Setup.ps1','StarSketch.Installer.psm1','StarSketch-安装卸载.cmd')){Copy-Item -LiteralPath (Join-Path $root ('installer\'+$name)) -Destination (Join-Path $stage $name)}

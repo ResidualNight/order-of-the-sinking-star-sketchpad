@@ -32,7 +32,7 @@ void icon(ImDrawList*dl,ImVec2 c,float size,int index,ImU32 ink){
 }
 void App::applyPadWheel(int index){
  if(index>=0&&index<4){choosePadTool(index);return;}
- if(index==4){document.clear();status="已清屏，可用 Y 撤销";}
+ if(index==4){document.clear();status="已清屏，可撤销";}
  else if(index==5){tint=!(tint&&monochromeTint);monochromeTint=true;if(tint&&!gridConfirmed&&!gridRecoveryActive&&!gridDirectionPending&&!levelPaused)requestGrid();}
  else if(index==6){requestImmediateGrid();}
 }
@@ -55,14 +55,15 @@ void App::drawPadWheel(float w,float h){
  dl->AddCircle(center,inner-2*uiScale,IM_COL32(121,137,155,150),64,1.5f*uiScale);
  auto centered=[&](const char*text,float y,float font,ImU32 color){auto sz=ImGui::GetFont()->CalcTextSizeA(font,1e5f,0,text);dl->AddText(ImGui::GetFont(),font,{center.x-sz.x*.5f,y},color,text);};
  float font=std::min(25.f*uiScale,r*.18f);
- centered("X",center.y-font*.65f,font*1.5f,gold);
+ padicons::draw(dl,{center.x-font,center.y-font},font*2,padBindings.get(PadAction::Wheel));
  const char*name=padWheelSelection>=0?wheel::Names[padWheelSelection]:"选择功能";
  float labelY=center.y+r+12*uiScale;auto textSize=ImGui::GetFont()->CalcTextSizeA(font,1e5f,0,name);
  dl->AddRectFilled({center.x-textSize.x*.5f-18*uiScale,labelY-5*uiScale},{center.x+textSize.x*.5f+18*uiScale,labelY+font+7*uiScale},IM_COL32(7,13,22,240),6*uiScale);
  centered(name,labelY,font,white);
- const char*hint=padWheelSelection==4?"松开 X 清屏 · Y 可撤销":(padWheelSelection==5?(tint&&monochromeTint?"松开 X 关闭染色":"松开 X 开启染色"):"左摇杆选择 · 松开 X 执行");
- centered(hint,labelY+font+15*uiScale,std::min(17.f*uiScale,r*.115f),gold);
- centered("回中取消选择 · B 取消轮盘",labelY+font+35*uiScale,std::min(15.f*uiScale,r*.10f),IM_COL32(196,202,213,255));
+ float hintSize=std::min(23.f*uiScale,r*.16f),hintFont=std::min(17.f*uiScale,r*.115f);
+ padicons::centered(dl,{center.x,labelY+font+13*uiScale},{{PadControl::LeftStick,"选择"},{padBindings.get(PadAction::Wheel),"松开执行"}},hintSize,hintFont);
+ padicons::centered(dl,{center.x,labelY+font+41*uiScale},{{padBindings.get(PadAction::Cancel),"取消 / 摇杆回中取消"}},hintSize,hintFont);
+ if(padWheelSelection==4)padicons::centered(dl,{center.x,labelY+font+69*uiScale},{{padBindings.get(PadAction::Undo),"清屏后可撤销"}},hintSize,hintFont);
  // Fade only vertices appended by this overlay, including its dimmer and labels.
  for(int i=firstVertex;i<dl->VtxBuffer.Size;++i){auto&color=dl->VtxBuffer[i].col;unsigned alpha=(color>>IM_COL32_A_SHIFT)&255;alpha=unsigned(alpha*padWheelOpacity+.5f);color=(color&~IM_COL32_A_MASK)|(alpha<<IM_COL32_A_SHIFT); }
 }

@@ -1,3 +1,4 @@
+#include "pad_icons.hpp"
 #include "ui.hpp"
 #include <cstdio>
 #include <utility>
@@ -219,8 +220,8 @@ void App::errorReportPanel(float w,float h){
  }
  ImGui::End();
 }
-void App::finishGesture(){if(erasing&&eraseChanged)document.record(eraseBefore);erasing=false;eraseChanged=false;if(numbering&&numberChanged)document.record(numberBefore);numbering=false;numberChanged=false;numberConnected=false;numberedCells.clear();}
-void App::restartNumbers(){finishGesture();cancelGesture();document.restartNumbers();status="后续编号从 1 开始，已保留现有编号";inputSuppressed=true;}
+void App::finishGesture(){if(erasing&&eraseChanged)document.record(eraseBefore);erasing=false;eraseChanged=false;padEraseConnected=false;if(numbering&&numberChanged)document.record(numberBefore);numbering=false;numberChanged=false;numberConnected=false;numberedCells.clear();}
+void App::restartNumbers(){if(padPointer)resetPadGesture();else{finishGesture();cancelGesture();}document.restartNumbers();status="后续编号从 1 开始，已保留现有编号";inputSuppressed=true;}
 void App::numberCells(Point cell){
  if(!std::isfinite(cell.x)||!std::isfinite(cell.y)||std::abs(cell.x)>1e6f||std::abs(cell.y)>1e6f){numberConnected=false;return;}
  Point from=numberConnected?numberLast:cell;
@@ -410,7 +411,7 @@ void App::settingsPanel(){
  if(ImGui::Begin("键位与设置",&settingsOpen,ImGuiWindowFlags_NoSavedSettings|ImGuiWindowFlags_NoResize|ImGuiWindowFlags_NoCollapse)){
   ImGui::BeginChild("##settingsBody",{0,-38*s},padPointer?ImGuiChildFlags_NavFlattened:ImGuiChildFlags_None);
   ImGui::Combo("界面模式",&padUiMode,"自动（按打开方式）\0固定键鼠\0固定手柄\0");
-  ImGui::Checkbox("LT + RT 打开草稿纸",&padEntryEnabled);ImGui::TextWrapped("双扳机在 180ms 内一起压下打开；单独扳机增加约 180ms 等待。界面模式在下次打开时生效。");
+  padicons::entry(padEntryEnabled,s);padBindingsPanel();ImGui::TextWrapped("双扳机在 180ms 内一起压下打开；单独扳机增加约 180ms 等待。界面模式在下次打开时生效。");
   ImGui::Checkbox("切换关卡自动清除标注",&autoClearOnLevel);
   ImGui::TextWrapped("初始默认关闭，会记住你的选择。开启后，确认切换关卡再清除标注并将编号归 1；可撤销。加载中或读取未确认时保留标注。");
   ImGui::TextDisabled("关卡监测：%s",levelWatch.known&&levelWatch.available&&!levelWatch.transitioning()?"已就绪":"等待可信数据");
@@ -473,9 +474,9 @@ void App::shortcuts(){
  if(bindings.active(Action::Grid)){gridEnabled=!gridEnabled;if(gridEnabled&&!gridConfirmed&&!gridRecoveryActive&&!gridDirectionPending&&!cameraPickerOpen&&!levelPaused)requestGrid();}
  if(bindings.active(Action::Tint)){tint=!tint;if(tint&&!gridConfirmed&&!gridRecoveryActive&&!gridDirectionPending&&!cameraPickerOpen&&!levelPaused)requestGrid();}
  if(bindings.active(Action::Calibrate))startCameraPicker();
- if(bindings.active(Action::Clear)){finishGesture();cancelGesture();document.clear();}
- if(bindings.active(Action::Undo)){finishGesture();cancelGesture();document.undo();}
- if(bindings.active(Action::Redo)){finishGesture();cancelGesture();document.redo();}
+ if(bindings.active(Action::Clear)){if(padPointer)resetPadGesture();else{finishGesture();cancelGesture();}document.clear();}
+ if(bindings.active(Action::Undo)){if(padPointer)resetPadGesture();else{finishGesture();cancelGesture();}document.undo();}
+ if(bindings.active(Action::Redo)){if(padPointer)resetPadGesture();else{finishGesture();cancelGesture();}document.redo();}
  if(ImGui::IsKeyPressed(ImGuiKey_Escape,false)){if(cameraPickerOpen)cancelCameraPicker();else if(drawing)cancelGesture();else wantExit=true;}
 }
 void App::frame(float w,float h){
@@ -483,7 +484,7 @@ void App::frame(float w,float h){
  resize(w,h);uiScale=std::clamp(h/1080.f,.75f,2.4f);ImGui::GetIO().FontGlobalScale=19.f/32.f*uiScale;
  bindings.update();shortcuts();padActions(w,h);
  if(editing){ImGui::BeginDisabled(padWheel);if(padLayout)padPanel(w,h);else{panel();if(padQuick)padPanel(w,h);}cameraPickerPanel(w,h);settingsPanel();errorReportPanel(w,h);ImGui::EndDisabled();}
- else{float s=uiScale;auto dl=ImGui::GetForegroundDrawList();auto label=bindings.label(Action::Toggle);if(padEntryEnabled&&padInput.connected)label+=" / LT+RT";float width=std::max(37.f*s,ImGui::CalcTextSize(label.c_str()).x+14*s);keycap(dl,{20*s,h-51*s},{20*s+width,h-18*s},label.c_str());dl->AddText({31*s+width,h-43*s},IM_COL32(238,215,154,205),"草稿纸");}
- canvas(w,h);drawPadWheel(w,h);padRtPrevious=padRt;padPrevious=padInput.buttons;
+ else{float s=uiScale;auto dl=ImGui::GetForegroundDrawList();auto label=bindings.label(Action::Toggle);float width=std::max(37.f*s,ImGui::CalcTextSize(label.c_str()).x+14*s);keycap(dl,{20*s,h-51*s},{20*s+width,h-18*s},label.c_str());if(padEntryEnabled&&padInput.connected){padicons::draw(dl,{29*s+width,h-51*s},33*s,PadControl::LT);dl->AddText({64*s+width,h-43*s},IM_COL32(238,215,154,205),"+");padicons::draw(dl,{77*s+width,h-51*s},33*s,PadControl::RT);width+=92*s;}dl->AddText({31*s+width,h-43*s},IM_COL32(238,215,154,205),"草稿纸");}
+ canvas(w,h);drawPadWheel(w,h);padRtPrevious=padRt;padPrevious=padInput.buttons;padHeldPrevious=padHeld;
 }
 }

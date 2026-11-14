@@ -88,6 +88,24 @@ public:
   }
   if(changed)marks=std::move(output);return changed;
  }
+ // Whole-mark capsule hit testing for the controller eraser. History is grouped
+ // by the caller, as with eraseSweep; mouse erasure keeps its existing behavior.
+ bool eraseWholeSweep(Point a,Point b,float radius){
+  if(!std::isfinite(a.x)||!std::isfinite(a.y)||!std::isfinite(b.x)||!std::isfinite(b.y)||!std::isfinite(radius)||radius<0)return false;
+  auto hitSegment=[&](Point c,Point d,float r){
+   auto ab=b-a,cd=d-c,ac=c-a;float cross=ab.x*cd.y-ab.y*cd.x;
+   if(std::abs(cross)>1e-8f){float u=(ac.x*cd.y-ac.y*cd.x)/cross,v=(ac.x*ab.y-ac.y*ab.x)/cross;if(u>=0&&u<=1&&v>=0&&v<=1)return true;}
+   return std::min({segmentDistance(a,c,d),segmentDistance(b,c,d),segmentDistance(c,a,b),segmentDistance(d,a,b)})<=r;
+  };
+  auto end=std::remove_if(marks.begin(),marks.end(),[&](const Mark&m){
+   if(m.points.empty())return false;
+   if(m.kind==Kind::Pin||m.kind==Kind::Number)return segmentDistance(m.points[0],a,b)<=radius+m.radius;
+   float r=radius+m.width*.5f;if(m.points.size()==1)return segmentDistance(m.points[0],a,b)<=r;
+   for(size_t i=1;i<m.points.size();++i)if(hitSegment(m.points[i-1],m.points[i],r))return true;
+   if(m.kind==Kind::Arrow){Point start=m.points.front(),tip=m.points.back();float n=length(tip-start);Point direction=n>.01f?(tip-start)*(1/n):Point{1,0},normal{-direction.y,direction.x};float h=std::max(12.f,m.width*4);return hitSegment(tip,tip-direction*h+normal*(h*.45f),r)||hitSegment(tip,tip-direction*h-normal*(h*.45f),r);}
+   return false;
+  });bool changed=end!=marks.end();marks.erase(end,marks.end());return changed;
+ }
  bool eraseSweep(Point a,Point b,float radius){float len=distance(a,b);int steps=std::max(1,(int)std::ceil(len/std::max(1.f,radius*.45f)));bool changed=false;for(int i=0;i<=steps;++i)changed=eraseCircle(a+(b-a)*(float(i)/steps),radius)||changed;return changed;}
 };
 }

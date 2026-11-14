@@ -26,6 +26,7 @@ std::string encodePreferences(const App& app){
  out<<"tint.monochrome="<<app.monochromeTint<<'\n';
  out<<"pad.wheel_scale="<<app.padWheelScale<<"\npad.wheel_opacity="<<app.padWheelOpacity<<'\n';
  out<<"pad.ui_mode="<<app.padUiMode<<"\npad.entry="<<app.padEntryEnabled<<"\npad.speed="<<app.padSpeed<<'\n';
+ for(int i=0;i<int(PadAction::Count);++i)out<<"pad.bind."<<PadActionNames[i]<<"="<<int(app.padBindings.get(PadAction(i)))<<"\n";
  for(size_t i=0;i<app.gridDirections.size();++i)out<<"grid_direction."<<i<<'='<<app.gridDirections[i]<<'\n';
  for(int i=0;i<int(Action::Count);++i){auto b=app.bindings.get(static_cast<Action>(i));out<<"key."<<ActionNames[i]<<'='<<keyCode(b.key)<<','<<modCode(b.mods)<<','<<keyCode(b.companion)<<'\n';}return out.str();
 }
@@ -41,12 +42,14 @@ bool decodePreferences(const std::string& text,App& app){
  if(!boolean("tint.monochrome",values.monochromeTint))return false;
  if(!scalar("pad.wheel_scale",values.padWheelScale,.5f,1.5f)||!scalar("pad.wheel_opacity",values.padWheelOpacity,.25f,1.f))return false;
  if(!integer("pad.ui_mode",values.padUiMode,0,2)||!boolean("pad.entry",values.padEntryEnabled)||!scalar("pad.speed",values.padSpeed,.25f,3.f))return false;
+ for(int i=0;i<int(PadAction::Count);++i){std::string name=std::string("pad.bind.")+PadActionNames[i];int control=int(values.padBindings.keys[i]);if(!integer(name.c_str(),control,0,int(PadControl::Count)-1))return false;values.padBindings.keys[i]=PadControl(control);}
+ if(!values.padBindings.valid())return false;
  for(size_t i=0;i<values.gridDirections.size();++i){auto key="grid_direction."+std::to_string(i);if(!integer(key.c_str(),values.gridDirections[i],-1,3))return false;}
  for(int i=3;i<5;++i){auto it=entries.find(i==3?"custom1":"custom2");if(it!=entries.end()){uint64_t c=0;if(!number(it->second,c)||c>UINT32_MAX||(c>>24)!=255)return false;values.colors[i]=uint32_t(c);}}
  std::array<KeyBinding,size_t(Action::Count)> bindings{};
  for(int i=0;i<int(Action::Count);++i){bindings[i]=values.bindings.get(static_cast<Action>(i));auto it=entries.find(std::string("key.")+ActionNames[i]);if(it==entries.end())continue;std::string data=it->second;for(auto&c:data)if(c==',')c=' ';std::istringstream in(data);int key=0,mods=0,companion=0;if(!(in>>key>>mods>>companion)||mods<0||mods>7||keyCode(fromCode(key))!=key||keyCode(fromCode(companion))!=companion)return false;in>>std::ws;if(!in.eof())return false;bindings[i]={fromCode(key),fromMods(mods),fromCode(companion)};}
  if(!values.bindings.restore(bindings))return false;
- app.padWheelScale=values.padWheelScale;app.padWheelOpacity=values.padWheelOpacity;app.padUiMode=values.padUiMode;app.padEntryEnabled=values.padEntryEnabled;app.padSpeed=values.padSpeed;app.autoClearOnLevel=values.autoClearOnLevel;app.gridEnabled=values.gridEnabled;app.tint=values.tint;app.monochromeTint=values.monochromeTint;app.gridDirections=values.gridDirections;app.colorIndex=values.colorIndex;app.colors=values.colors;app.penWidth=values.penWidth;app.eraseRadius=values.eraseRadius;app.pinRadius=values.pinRadius;app.numberRadius=values.numberRadius;app.markOpacity=values.markOpacity;app.tintOpacity=values.tintOpacity;app.bindings=values.bindings;return true;
+ app.padBindings=values.padBindings;app.padWheelScale=values.padWheelScale;app.padWheelOpacity=values.padWheelOpacity;app.padUiMode=values.padUiMode;app.padEntryEnabled=values.padEntryEnabled;app.padSpeed=values.padSpeed;app.autoClearOnLevel=values.autoClearOnLevel;app.gridEnabled=values.gridEnabled;app.tint=values.tint;app.monochromeTint=values.monochromeTint;app.gridDirections=values.gridDirections;app.colorIndex=values.colorIndex;app.colors=values.colors;app.penWidth=values.penWidth;app.eraseRadius=values.eraseRadius;app.pinRadius=values.pinRadius;app.numberRadius=values.numberRadius;app.markOpacity=values.markOpacity;app.tintOpacity=values.tintOpacity;app.bindings=values.bindings;return true;
 }
 bool PreferenceStore::resolvePath(){
  if(!path.empty())return true;DWORD size=GetEnvironmentVariableW(L"LOCALAPPDATA",nullptr,0);if(!size||size>32700)return false;std::vector<wchar_t> buffer(size);if(!GetEnvironmentVariableW(L"LOCALAPPDATA",buffer.data(),size))return false;path=std::wstring(buffer.data())+L"\\StarSketch\\settings.ini";return true;

@@ -16,7 +16,7 @@ void emit(const char* text){if(logger)logger(text);}
 }
 void start(Log log){
  logger=log;hook=pad::install(GetModuleHandleW(nullptr));
- emit(hook.installed?"Controller preview 7 initialized; LT+RT entry; capture defaults OFF":"[SS-INPUT-002] Controller consumer hook unavailable; capture OFF");
+ emit(hook.installed?"Controller preview 8.3 initialized; LT+RT entry; capture defaults OFF":"[SS-INPUT-002] Controller consumer hook unavailable; capture OFF");
 }
 void close(){if(pad::capturing()){pad::setCapturing(false);emit("Controller isolation OFF; release fences active");}}
 void emergency(){pad::failOpen();emit("Controller isolation emergency pass-through");}
@@ -25,7 +25,7 @@ void maintain(){
  if(hook.installed&&tick>=cacheDue&&(cached==pad::CachedHook::Pending||cached==pad::CachedHook::Attached)){
   auto previous=cached;cached=pad::attachCachedGameState(GetModuleHandleW(nullptr));cacheDue=tick+1000;
   if(cached!=previous){
-   if(cached==pad::CachedHook::Attached)emit("Controller cache attached: profile=steam-26249670 original chain preserved");
+   if(cached==pad::CachedHook::Attached)emit("Controller cache attached: validated game profile; original chain preserved");
    else if(cached==pad::CachedHook::Unsupported)emit("[SS-INPUT-006] Controller cache profile did not validate; import bridge only");
    else if(cached!=pad::CachedHook::Pending)emit("[SS-INPUT-004] Controller cache unavailable or changed; capture unavailable");
   }
