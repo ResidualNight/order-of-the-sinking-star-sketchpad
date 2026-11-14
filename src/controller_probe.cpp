@@ -16,7 +16,7 @@ void emit(const char* text){if(logger)logger(text);}
 }
 void start(Log log){
  logger=log;hook=pad::install(GetModuleHandleW(nullptr));
- emit(hook.installed?"Controller preview 8.3 initialized; LT+RT entry; capture defaults OFF":"[SS-INPUT-002] Controller consumer hook unavailable; capture OFF");
+ emit(hook.installed?"Controller support initialized; LT+RT entry; capture defaults OFF":"[SS-INPUT-002] Controller consumer hook unavailable; capture OFF");
 }
 void close(){if(pad::capturing()){pad::setCapturing(false);emit("Controller isolation OFF; release fences active");}}
 void emergency(){pad::failOpen();emit("Controller isolation emergency pass-through");}

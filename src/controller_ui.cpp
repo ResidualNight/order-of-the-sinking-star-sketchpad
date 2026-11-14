@@ -1,4 +1,5 @@
 #include "ui.hpp"
+#include "version.hpp"
 #include "imgui_internal.h"
 #include <cstdio>
 #include "pad_icons.hpp"
@@ -139,7 +140,7 @@ void App::padPanel(float w,float h){
   ImGui::SetNextWindowPos({12*s,12*s},ImGuiCond_Always);ImGui::SetNextWindowSize({std::min(w-24*s,540*s),0});
   ImGui::Begin("##PadStatus",nullptr,ImGuiWindowFlags_NoTitleBar|ImGuiWindowFlags_NoResize|ImGuiWindowFlags_NoMove|ImGuiWindowFlags_NoSavedSettings|ImGuiWindowFlags_NoNavFocus|ImGuiWindowFlags_AlwaysAutoResize);
   auto notice=updateNotice(availableUpdate);if(!notice.empty())ImGui::TextColored({.43f,.89f,.56f,1},"%s",notice.c_str());
-  ImGui::Text("手柄预览 8.3 · %s · 吸附 %s",tools[padEraseTool?4:int(tool)],snappingReady()?"已就绪":"未启用");
+  ImGui::Text("草稿纸 %s · %s · 吸附 %s",CurrentVersion,tools[padEraseTool?4:int(tool)],snappingReady()?"已就绪":"未启用");
   ImGui::ColorButton("当前颜色",ImGui::ColorConvertU32ToFloat4(selectedColor()),ImGuiColorEditFlags_NoTooltip,{20*s,14*s});ImGui::SameLine();ImGui::Text("笔宽 %.1f · 下个编号 %d",penWidth,document.nextNumber);
 
   if(!padInput.connected)ImGui::TextWrapped("手柄已断开，可用鼠标继续操作。");
