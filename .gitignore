@@ -60,3 +60,4 @@
 *.key
 id_ed25519*
 id_rsa*
+!/build-controller-probe.ps1

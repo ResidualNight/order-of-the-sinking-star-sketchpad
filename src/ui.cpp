@@ -1,3 +1,4 @@
+#include "pad_icons.hpp"
 #include "ui.hpp"
 #include <cstdio>
 #include <utility>
@@ -34,10 +35,12 @@ bool App::setEditing(bool enabled){
  if(editing==enabled)return false;
  editing=enabled;
  if(enabled){
+  padLayout=padUiMode==2||(padUiMode==0&&padOpening);padPointer=padOpening;padReady=false;padQuick=false;padConfirmClear=false;padEraseTool=false;
+  if(padOpening&&!padUsed){tool=Kind::Pin;padUsed=true;}padOpening=false;
   if(gridPinned&&grid.usable()){gridConfirmed=!levelPaused;status=levelPaused?"等待关卡确认，暂时保留当前网格":"已保留本次采用的网格与吸附";}
   else if(!gridRefresh.requested)requestGrid();
  }
- else{finishGesture();cancelGesture();cancelCameraPicker();reportOpen=false;settingsOpen=false;capturingBinding=-1;captureKey=ImGuiKey_None;}
+ else{resetPadGesture();padQuick=false;padConfirmClear=false;finishGesture();cancelGesture();cancelCameraPicker();reportOpen=false;settingsOpen=false;capturingBinding=-1;captureKey=ImGuiKey_None;}
  return true;
 }
 void App::requestGrid(bool resized){
@@ -217,8 +220,8 @@ void App::errorReportPanel(float w,float h){
  }
  ImGui::End();
 }
-void App::finishGesture(){if(erasing&&eraseChanged)document.record(eraseBefore);erasing=false;eraseChanged=false;if(numbering&&numberChanged)document.record(numberBefore);numbering=false;numberChanged=false;numberConnected=false;numberedCells.clear();}
-void App::restartNumbers(){finishGesture();cancelGesture();document.restartNumbers();status="后续编号从 1 开始，已保留现有编号";inputSuppressed=true;}
+void App::finishGesture(){if(erasing&&eraseChanged)document.record(eraseBefore);erasing=false;eraseChanged=false;padEraseConnected=false;if(numbering&&numberChanged)document.record(numberBefore);numbering=false;numberChanged=false;numberConnected=false;numberedCells.clear();}
+void App::restartNumbers(){if(padPointer)resetPadGesture();else{finishGesture();cancelGesture();}document.restartNumbers();status="后续编号从 1 开始，已保留现有编号";inputSuppressed=true;}
 void App::numberCells(Point cell){
  if(!std::isfinite(cell.x)||!std::isfinite(cell.y)||std::abs(cell.x)>1e6f||std::abs(cell.y)>1e6f){numberConnected=false;return;}
  Point from=numberConnected?numberLast:cell;
@@ -272,7 +275,7 @@ void App::drawGrid(ImDrawList* dl,float w,float h,const Grid* preview){
   if(grid.denominator(x-.5f,y-.5f)<=.02f||grid.denominator(x+.5f,y+.5f)<=.02f)continue;
   Point p[]={grid.at(x-.5f,y-.5f),grid.at(x+.5f,y-.5f),grid.at(x+.5f,y+.5f),grid.at(x-.5f,y+.5f)};
   if(!std::all_of(p,p+4,finite))continue;ImVec2 q[]={im(p[0]),im(p[1]),im(p[2]),im(p[3])};
-  dl->AddConvexPolyFilled(q,4,faded(((x+y)&1)?IM_COL32(29,48,79,255):IM_COL32(241,206,125,255),tintOpacity));
+  dl->AddConvexPolyFilled(q,4,faded(monochromeTint?(((x+y)&1)?IM_COL32(15,15,15,255):IM_COL32(245,245,245,255)):(((x+y)&1)?IM_COL32(29,48,79,255):IM_COL32(241,206,125,255)),tintOpacity));
  }
  if(editing&&gridEnabled){
   ImU32 color=IM_COL32(234,213,143,90);auto line=[&](Point a,Point b){if(finite(a)&&finite(b))dl->AddLine(im(a),im(b),color,1);};
@@ -294,10 +297,10 @@ void App::panel(){float s=uiScale;ImGui::SetNextWindowPos({18*s,22*s},ImGuiCond_
   ImGui::PushTextWrapPos(0);ImGui::TextColored(ImVec4(.60f,.60f,.60f,1),"%s",errorMessage(gameBuildWarning).c_str());ImGui::PopTextWrapPos();
  }
  ImGui::BeginDisabled(settingsOpen||reportOpen);
- if(row("pen",bindings.label(Action::Pen).c_str(),"自由画笔",tool==Kind::Stroke)){cancelGesture();tool=Kind::Stroke;}
- if(row("arrow",bindings.label(Action::Arrow).c_str(),"箭头",tool==Kind::Arrow)){cancelGesture();tool=Kind::Arrow;}
- if(row("pin",bindings.label(Action::Pin).c_str(),"星标",tool==Kind::Pin)){cancelGesture();tool=Kind::Pin;}
- if(row("number",bindings.label(Action::Number).c_str(),"编号",tool==Kind::Number)){cancelGesture();tool=Kind::Number;}
+ if(row("pen",bindings.label(Action::Pen).c_str(),"自由画笔",tool==Kind::Stroke)){cancelGesture();padEraseTool=false;tool=Kind::Stroke;}
+ if(row("arrow",bindings.label(Action::Arrow).c_str(),"箭头",tool==Kind::Arrow)){cancelGesture();padEraseTool=false;tool=Kind::Arrow;}
+ if(row("pin",bindings.label(Action::Pin).c_str(),"星标",tool==Kind::Pin)){cancelGesture();padEraseTool=false;tool=Kind::Pin;}
+ if(row("number",bindings.label(Action::Number).c_str(),"编号",tool==Kind::Number)){cancelGesture();padEraseTool=false;tool=Kind::Number;}
  if(tool==Kind::Number){ImGui::TextDisabled("下个编号：%d",document.nextNumber);ImGui::TextWrapped("开启吸附后，按住左键滑动快速编号");}
  if(row("restartNumber",bindings.label(Action::RestartNumber).c_str(),"编号从 1 开始"))restartNumbers();
  row("eraser",bindings.label(Action::Erase).c_str(),"按住擦除");
@@ -306,6 +309,17 @@ void App::panel(){float s=uiScale;ImGui::SetNextWindowPos({18*s,22*s},ImGuiCond_
  if(row("cameraPicker",bindings.label(Action::Calibrate).c_str(),"临时选择相机",cameraPickerOpen))startCameraPicker();
  if(ImGui::Button("重新识别",{137*s,29*s}))requestImmediateGrid();ImGui::SameLine();if(ImGui::Button(("退出绘画  "+bindings.label(Action::Toggle)).c_str(),{137*s,29*s}))wantExit=true;
  if(gridEnabled&&grid.usable()&&!gridConfirmed&&!gridDirectionPending&&!cameraPickerOpen&&!levelPaused){if(ImGui::Button("采用候选网格",{0,29*s})){gridRefresh.cancel();gridConfirmed=true;status="已采用候选网格，可继续精调";}}
+ gridTuningPanel();
+ ImGui::Spacing();ImGui::Separator();
+ ImGui::TextDisabled("画笔 / 箭头 / 星标共用颜色");
+ for(int i=0;i<5;i++){ImGui::PushID(i);ImVec4 c=ImGui::ColorConvertU32ToFloat4(colors[i]);if(ImGui::ColorButton("##color",c,ImGuiColorEditFlags_NoTooltip,{37*s,24*s}))colorIndex=i;if(colorIndex==i){auto a=ImGui::GetItemRectMin(),b=ImGui::GetItemRectMax();dl->AddRect(a,b,Pale,2,0,2);}if(ImGui::IsItemHovered())ImGui::SetTooltip("%s",i<3?(i==0?"红色":i==1?"白色":"蓝色"):"自定义颜色：在键位与设置中编辑");ImGui::PopID();if(i<4)ImGui::SameLine();}
+
+ ImGui::Separator();if(ImGui::Button("键位与设置",{0,29*s})){finishGesture();cancelGesture();settingsOpen=true;capturingBinding=-1;bindingStatus.clear();}
+ ImGui::TextWrapped("%s 清空 · %s 撤销 · %s 重做",bindings.label(Action::Clear).c_str(),bindings.label(Action::Undo).c_str(),bindings.label(Action::Redo).c_str());ImGui::TextDisabled("Esc 取消 / 返回游戏");if(!status.empty()){ImGui::PushTextWrapPos(0);ImGui::TextColored(ImVec4(.76f,.80f,.78f,1),"%s",status.c_str());ImGui::PopTextWrapPos();}
+ reportButton();ImGui::EndDisabled();
+ ImGui::End();ImGui::PopStyleVar(2);
+}
+void App::gridTuningPanel(){float s=uiScale;
  if(gridEnabled&&!cameraPickerOpen){if(gridDirectionPending)ImGui::SetNextItemOpen(true,ImGuiCond_Always);
  if(ImGui::CollapsingHeader("网格精调")){ImGui::PushItemWidth(145*s);
  if(gridRecoveryActive&&recoveryOption){ImGui::BeginDisabled(levelPaused);int aspect=recoveryAspect,fit=recoveryFit;if(cameraMappingControls(*recoveryOption,aspect,fit,true))updateRecoveryMapping(aspect,fit);ImGui::TextWrapped("切换游戏画面比例或显示方式会重置下方精调；请先选择显示方式，再调整格距等参数。");ImGui::EndDisabled();}
@@ -321,14 +335,6 @@ void App::panel(){float s=uiScale;ImGui::SetNextWindowPos({18*s,22*s},ImGuiCond_
  if(gridFromGame){if(ImGui::DragFloat("高度层",&gridPlaneZ,.05f,-1000,1000,"%.2f")){gridPlaneOverride=true;requestGrid();}if(ImGui::Button("使用角色所在层")){gridPlaneOverride=false;requestGrid();}}
  bool changed=ImGui::DragFloat2("基点",&grid.origin.x,.5f,0,0,"%.1f");changed=ImGui::DragFloat2("横向步长",&grid.u.x,.2f,0,0,"%.1f")||changed;changed=ImGui::DragFloat2("纵向步长",&grid.v.x,.2f,0,0,"%.1f")||changed;if(std::abs(grid.px)+std::abs(grid.py)>.00001f)changed=ImGui::DragFloat2("透视参数",&grid.px,.00001f,-.2f,.2f,"%.5f")||changed;if(changed){gridFromGame=false;gridRefresh.cancel();gridConfirmed=grid.usable();}
  ImGui::PopItemWidth();if(ImGui::Button("格距 ×2")){grid.scaleStep(2);gridFromGame=false;gridRefresh.cancel();gridConfirmed=grid.usable();}ImGui::SameLine();if(ImGui::Button("格距 ÷2")){if(length(grid.u)>16&&length(grid.v)>16){grid.scaleStep(.5f);gridFromGame=false;gridRefresh.cancel();gridConfirmed=grid.usable();}}ImGui::EndDisabled();}}
- ImGui::Spacing();ImGui::Separator();
- ImGui::TextDisabled("画笔 / 箭头 / 星标共用颜色");
- for(int i=0;i<5;i++){ImGui::PushID(i);ImVec4 c=ImGui::ColorConvertU32ToFloat4(colors[i]);if(ImGui::ColorButton("##color",c,ImGuiColorEditFlags_NoTooltip,{37*s,24*s}))colorIndex=i;if(colorIndex==i){auto a=ImGui::GetItemRectMin(),b=ImGui::GetItemRectMax();dl->AddRect(a,b,Pale,2,0,2);}if(ImGui::IsItemHovered())ImGui::SetTooltip("%s",i<3?(i==0?"红色":i==1?"白色":"蓝色"):"自定义颜色：在键位与设置中编辑");ImGui::PopID();if(i<4)ImGui::SameLine();}
-
- ImGui::Separator();if(ImGui::Button("键位与设置",{0,29*s})){finishGesture();cancelGesture();settingsOpen=true;capturingBinding=-1;bindingStatus.clear();}
- ImGui::TextWrapped("%s 清空 · %s 撤销 · %s 重做",bindings.label(Action::Clear).c_str(),bindings.label(Action::Undo).c_str(),bindings.label(Action::Redo).c_str());ImGui::TextDisabled("Esc 取消 / 返回游戏");if(!status.empty()){ImGui::PushTextWrapPos(0);ImGui::TextColored(ImVec4(.76f,.80f,.78f,1),"%s",status.c_str());ImGui::PopTextWrapPos();}
- reportButton();ImGui::EndDisabled();
- ImGui::End();ImGui::PopStyleVar(2);
 }
 void App::cameraPickerPanel(float w,float h){
  if(!cameraPickerOpen)return;float s=uiScale,width=std::max(1.f,std::min(354*s,w-16*s));
@@ -343,7 +349,7 @@ void App::cameraPickerPanel(float w,float h){
   else ImGui::Text("候选 %d / %zu",selectedCamera+1,cameraOptions.size());
   ImGui::BeginDisabled(pickerCollecting||settingsOpen||reportOpen);
   if(!cameraOptions.empty()){
-   if(ImGui::BeginChild("##cameraChoices",{0,132*s},ImGuiChildFlags_Borders)){
+   if(ImGui::BeginChild("##cameraChoices",{0,132*s},ImGuiChildFlags_Borders|(padPointer?ImGuiChildFlags_NavFlattened:0))){
     for(size_t i=0;i<cameraOptions.size();++i){char label[100];std::snprintf(label,sizeof(label),"候选 %zu%s",i+1,cameraOptions[i].scenePose?"（场景相机·试用）":auxiliaryCamera(cameraOptions[i].camera.sourceType())?"（辅助视图）":cameraOptions[i].projectionUnverified?"（待确认）":cameraOptions[i].directionCategory?"（方向异常）":"（原方案）");
      if(ImGui::Selectable(label,selectedCamera==int(i)))selectCamera(int(i));
     }
@@ -376,10 +382,11 @@ void App::cameraPickerPanel(float w,float h){
  ImGui::End();if(originalRequested)requestOriginalGrid();else if(!open)cancelCameraPicker();
 }
 void App::canvas(float w,float h){auto dl=ImGui::GetBackgroundDrawList();if(cameraPickerOpen){auto preview=cameraPickerPreview();drawGrid(dl,w,h,&preview);}else drawGrid(dl,w,h);for(auto&m:document.marks)drawMark(dl,m);
- if(!editing||settingsOpen||reportOpen||inputSuppressed)return;auto&io=ImGui::GetIO();Point mouse=pt(io.MousePos);
+ if(editing&&padPointer&&padInput.connected){padCanvas(w,h);return;}
+ if(!editing||settingsOpen||reportOpen||padQuick||inputSuppressed)return;auto&io=ImGui::GetIO();Point mouse=pt(io.MousePos);
  // ImGui drops HoveredWindow during a drag that began on the external canvas.
  bool overPanel=mouse.x>=panelMin.x&&mouse.y>=panelMin.y&&mouse.x<panelMax.x&&mouse.y<panelMax.y;
- bool overUI=overPanel||ImGui::IsWindowHovered(ImGuiHoveredFlags_AnyWindow)||ImGui::IsAnyItemActive();bool inside=mouse.x>=0&&mouse.y>=0&&mouse.x<w&&mouse.y<h;bool eraseHeld=bindings.active(Action::Erase,true);
+ bool overUI=overPanel||ImGui::IsWindowHovered(ImGuiHoveredFlags_AnyWindow)||ImGui::IsAnyItemActive();bool inside=mouse.x>=0&&mouse.y>=0&&mouse.x<w&&mouse.y<h;bool eraseHeld=bindings.active(Action::Erase,true)||(padLayout&&padEraseTool&&io.MouseDown[0]);
  if(erasing&&!eraseHeld)finishGesture();
  bool snapNumbers=tool==Kind::Number&&snappingReady();
  if(numbering&&(!io.MouseDown[0]||eraseHeld||!snapNumbers))finishGesture();
@@ -402,7 +409,9 @@ void App::settingsPanel(){
  ImGui::SetNextWindowSize({600*s,std::max(1.f,std::min(720*s,ImGui::GetIO().DisplaySize.y-40*s))},ImGuiCond_Always);
  ImGui::PushStyleColor(ImGuiCol_TitleBg,{.035f,.055f,.085f,1});ImGui::PushStyleColor(ImGuiCol_TitleBgActive,{.12f,.14f,.16f,1});
  if(ImGui::Begin("键位与设置",&settingsOpen,ImGuiWindowFlags_NoSavedSettings|ImGuiWindowFlags_NoResize|ImGuiWindowFlags_NoCollapse)){
-  ImGui::BeginChild("##settingsBody",{0,-38*s},ImGuiChildFlags_None);
+  ImGui::BeginChild("##settingsBody",{0,-38*s},padPointer?ImGuiChildFlags_NavFlattened:ImGuiChildFlags_None);
+  ImGui::Combo("界面模式",&padUiMode,"自动（按打开方式）\0固定键鼠\0固定手柄\0");
+  padicons::entry(padEntryEnabled,s);padBindingsPanel();ImGui::TextWrapped("双扳机在 180ms 内一起压下打开；单独扳机增加约 180ms 等待。界面模式在下次打开时生效。");
   ImGui::Checkbox("切换关卡自动清除标注",&autoClearOnLevel);
   ImGui::TextWrapped("初始默认关闭，会记住你的选择。开启后，确认切换关卡再清除标注并将编号归 1；可撤销。加载中或读取未确认时保留标注。");
   ImGui::TextDisabled("关卡监测：%s",levelWatch.known&&levelWatch.available&&!levelWatch.transitioning()?"已就绪":"等待可信数据");
@@ -429,6 +438,7 @@ void App::settingsPanel(){
  ImGui::End();ImGui::PopStyleColor(2);if(!settingsOpen){capturingBinding=-1;inputSuppressed=true;}
 }
 void App::shortcuts(){
+ if(padWheel){if(ImGui::IsKeyPressed(ImGuiKey_Escape,false))resetPadGesture();return;}
  auto&io=ImGui::GetIO();
  if(reportOpen){
   if(ImGui::IsKeyPressed(ImGuiKey_Escape,false)){reportOpen=false;inputSuppressed=true;}
@@ -460,21 +470,21 @@ void App::shortcuts(){
  if(bindings.active(Action::Toggle)){setEditing(!editing);inputSuppressed=true;return;}
  if(!editing)return;
  if(bindings.active(Action::RestartNumber)){restartNumbers();return;}
- for(auto choice:{std::pair<Action,Kind>{Action::Pen,Kind::Stroke},{Action::Arrow,Kind::Arrow},{Action::Pin,Kind::Pin},{Action::Number,Kind::Number}})if(bindings.active(choice.first)){finishGesture();cancelGesture();tool=choice.second;}
+ for(auto choice:{std::pair<Action,Kind>{Action::Pen,Kind::Stroke},{Action::Arrow,Kind::Arrow},{Action::Pin,Kind::Pin},{Action::Number,Kind::Number}})if(bindings.active(choice.first)){finishGesture();cancelGesture();padEraseTool=false;tool=choice.second;}
  if(bindings.active(Action::Grid)){gridEnabled=!gridEnabled;if(gridEnabled&&!gridConfirmed&&!gridRecoveryActive&&!gridDirectionPending&&!cameraPickerOpen&&!levelPaused)requestGrid();}
  if(bindings.active(Action::Tint)){tint=!tint;if(tint&&!gridConfirmed&&!gridRecoveryActive&&!gridDirectionPending&&!cameraPickerOpen&&!levelPaused)requestGrid();}
  if(bindings.active(Action::Calibrate))startCameraPicker();
- if(bindings.active(Action::Clear)){finishGesture();cancelGesture();document.clear();}
- if(bindings.active(Action::Undo)){finishGesture();cancelGesture();document.undo();}
- if(bindings.active(Action::Redo)){finishGesture();cancelGesture();document.redo();}
+ if(bindings.active(Action::Clear)){if(padPointer)resetPadGesture();else{finishGesture();cancelGesture();}document.clear();}
+ if(bindings.active(Action::Undo)){if(padPointer)resetPadGesture();else{finishGesture();cancelGesture();}document.undo();}
+ if(bindings.active(Action::Redo)){if(padPointer)resetPadGesture();else{finishGesture();cancelGesture();}document.redo();}
  if(ImGui::IsKeyPressed(ImGuiKey_Escape,false)){if(cameraPickerOpen)cancelCameraPicker();else if(drawing)cancelGesture();else wantExit=true;}
 }
 void App::frame(float w,float h){
- if(!std::isfinite(w)||!std::isfinite(h)||w<=0||h<=0){finishGesture();cancelGesture();inputSuppressed=true;return;}
+ if(!std::isfinite(w)||!std::isfinite(h)||w<=0||h<=0){resetPadGesture();inputSuppressed=true;return;}
  resize(w,h);uiScale=std::clamp(h/1080.f,.75f,2.4f);ImGui::GetIO().FontGlobalScale=19.f/32.f*uiScale;
- bindings.update();shortcuts();
- if(editing){panel();cameraPickerPanel(w,h);settingsPanel();errorReportPanel(w,h);}
- else{float s=uiScale;auto dl=ImGui::GetForegroundDrawList();auto label=bindings.label(Action::Toggle);float width=std::max(37.f*s,ImGui::CalcTextSize(label.c_str()).x+14*s);keycap(dl,{20*s,h-51*s},{20*s+width,h-18*s},label.c_str());dl->AddText({31*s+width,h-43*s},IM_COL32(238,215,154,205),"草稿纸");}
- canvas(w,h);
+ bindings.update();shortcuts();padActions(w,h);
+ if(editing){ImGui::BeginDisabled(padWheel);if(padLayout)padPanel(w,h);else{panel();if(padQuick)padPanel(w,h);}cameraPickerPanel(w,h);settingsPanel();errorReportPanel(w,h);ImGui::EndDisabled();}
+ else{float s=uiScale;auto dl=ImGui::GetForegroundDrawList();auto label=bindings.label(Action::Toggle);float width=std::max(37.f*s,ImGui::CalcTextSize(label.c_str()).x+14*s);keycap(dl,{20*s,h-51*s},{20*s+width,h-18*s},label.c_str());if(padEntryEnabled&&padInput.connected){padicons::draw(dl,{29*s+width,h-51*s},33*s,PadControl::LT);dl->AddText({64*s+width,h-43*s},IM_COL32(238,215,154,205),"+");padicons::draw(dl,{77*s+width,h-51*s},33*s,PadControl::RT);width+=92*s;}dl->AddText({31*s+width,h-43*s},IM_COL32(238,215,154,205),"草稿纸");}
+ canvas(w,h);drawPadWheel(w,h);padRtPrevious=padRt;padPrevious=padInput.buttons;padHeldPrevious=padHeld;
 }
 }
