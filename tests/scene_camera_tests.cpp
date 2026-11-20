@@ -58,14 +58,17 @@ struct Fixture {
   put(manager,0xdd0,Array{1,base()+0xb00400,1});put(image,0xb00400,base()+0xb01000);put(image,0xb01000+240,root());put(image,0xb01000+256,uint32_t(8));
   put(image,0xb01000+264,base()+0xb00500);put(image,0xb00500,Type{7,0,1320,8,base()+0xb00600});std::memcpy(image.data()+0xb00600,"Settings",8);
   put(image,0xb01000+816,Geometry{8,7,56,0,{},{}});put(image,0xb01000+1296,int64_t(7));put(image,0xb01000+1304,base()+0xb00700);std::memcpy(image.data()+0xb00700,"fixture",7);
-  if(profile==1){
+  if(profile==1||profile==3){
    pattern(image,Gate,{0x49,0x8d,0xac,0x24,0x98,0x3d,0,0,0x48,0x8b,0x05,0,0,0,0,0x48,0x85,0xc0,0x0f,0x84,0,0,0,0,0x48,0x83,0xf8,1,0x0f,0x85,0,0,0,0});
-   put(image,Gate+11,int32_t(Mode-Gate-15));put(image,Gate+20,int32_t(Normal-Gate-24));put(image,Gate+30,int32_t(Frozen-Gate-34));
+   bool extendedLoop=profile==3;
+   const size_t mode=extendedLoop?0xb7ca80:Mode,slot=extendedLoop?0xb7b6f0:0xb68618;
+   put(image,Gate+11,int32_t(mode-Gate-15));put(image,Gate+20,int32_t(Normal-Gate-24));put(image,Gate+30,int32_t(Frozen-Gate-34));
    pattern(image,Normal,{0x4c,0x89,0x74,0x24,0,0x49,0x83,0xbc,0x24,0x38,5,0,0,0,0x0f,0x8e,0,0,0,0});
-   put(image,Normal+60,uint32_t(0x538));image[Normal+69]=0xcc;
-   pattern(image,Normal+70,{0x49,0x8b,0x84,0x24,0x40,5,0,0,0x4a,0x8b,0x1c,0xf8});
+   if(extendedLoop)pattern(image,Normal+54,{0x49,0xff,0xc7,0x4d,0x3b,0xbc,0x24,0x38,5,0,0,0x0f,0x8d,0,0,0,0});
+   else{put(image,Normal+60,uint32_t(0x538));image[Normal+69]=0xcc;}
+   pattern(image,Normal+70+extendedLoop,{0x49,0x8b,0x84,0x24,0x40,5,0,0,0x4a,0x8b,0x1c,0xf8});
    pattern(image,Frozen-19,{0x41,0x0f,0x13,0x84,0x24,0x98,0x3d,0,0,0xf3,0x41,0x0f,0x11,0x94,0x24,0xa0,0x3d,0,0,0x49,0x8b,0x04,0x24,0x48,0x83,0xc0,0xfb,0x48,0x83,0xf8,0x14,0x0f,0x87,0,0,0,0});
-   put(image,Link+3,int32_t(0xb68618-Link-7));put(image,0xb69600,uintptr_t(0));put(image,0xb68618,root());
+   put(image,Link+3,int32_t(slot-Link-7));put(image,0xb69600,uintptr_t(0));put(image,slot,root());
   }else if(profile==2){
    put(image,Normal+60,uint32_t(0x538));image[Normal+69]=0xcc;
    pattern(image,Normal+70,{0x49,0x8b,0x85,0x40,5,0,0,0x4a,0x8b,0x1c,0xf8});
@@ -172,6 +175,20 @@ void checkSceneCamera(const char* filename){
  std::memcpy(latest->image.data()+0x1a00,latest->image.data()+Fixture::Gate,33);assert(!reader.discover(readMemory,latest->base(),0xb744d0));std::fill(latest->image.begin()+0x1a00,latest->image.begin()+0x1a21,0xcc);
  camera=gameCameraFixture();checkSceneCameraReaderFixture(latest->base(),&camera,pose,0xb744d0);
  camera=gameCameraFixture();checkSceneCameraWorker(latest->base(),&camera,0xb744d0);
+ auto current=std::make_unique<Fixture>(3);
+ constexpr uintptr_t currentSlot=0xb7b6f0;
+ assert(!reader.discover(readMemory,current->base(),0xb68618)&&!reader.discover(readMemory,current->base(),0xb744d0));
+ assert(reader.discover(readMemory,current->base(),currentSlot)&&reader.sample(readMemory,current->root(),result));
+ assert(reader.discovered().mode==current->base()+0xb7ca80&&reader.discovered().evidence.size()==6);
+ const auto loopCount=Fixture::Normal+61;
+ put(current->image,loopCount,uint32_t(0x540));
+ assert(!reader.sample(readMemory,current->root(),result)&&!reader.discover(readMemory,current->base(),currentSlot));
+ put(current->image,loopCount,uint32_t(0x538));
+ current->image[Fixture::Normal+56]^=1;
+ assert(!reader.discover(readMemory,current->base(),currentSlot));
+ current->image[Fixture::Normal+56]^=1;
+ camera=gameCameraFixture();checkSceneCameraReaderFixture(current->base(),&camera,pose,currentSlot);
+ camera=gameCameraFixture();checkSceneCameraWorker(current->base(),&camera,currentSlot);
  verifyFile(filename);
  std::cout<<"PASS: scene pose projection vs captured matrix, source/map guards, six code proofs, layout ambiguity/conflicts and original fallback\n";
 }

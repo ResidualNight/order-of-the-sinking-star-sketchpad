@@ -99,7 +99,12 @@ bool SceneCameraReader::discover(Read read,uintptr_t image,uintptr_t managerRva)
  // Build 26466613 uses R13 for the manager and R15 for the list index.
  // Its loop is one byte longer than r67271; retain the complete list proof.
  bool r13R15=!r12&&matches(code,normal+70,{0x49,0x8b,0x85,-1,-1,-1,-1,0x4a,0x8b,0x1c,0xf8});
+ // Build 26787118 moves the R12 loop one byte later. Verify the index increment,
+ // count comparison and conditional jump immediately before the list load.
+ constexpr int extendedLoopOffset=54,extendedLoopSize=17;
+ bool extendedR12=r12&&matches(code,normal+extendedLoopOffset,{0x49,0xff,0xc7,0x4d,0x3b,0xbc,0x24,-1,-1,-1,-1,0x0f,0x8d,-1,-1,-1,-1});
  int loopShift=(r12||r13R15)?1:0;
+ if(extendedR12)++loopShift;
  int64_t list=normal+69+loopShift,write=frozen-(r12?19:17);
  if(!(r12?matches(code,normal,{0x4c,0x89,0x74,0x24,-1,0x49,0x83,0xbc,0x24,-1,-1,-1,-1,0,0x0f,0x8e,-1,-1,-1,-1}):matches(code,normal,{0x4c,0x89,0x74,0x24,-1,0x49,0x83,0xbd,-1,-1,-1,-1,0,0x0f,0x8e,-1,-1,-1,-1}))||
     !matches(code,normal-23,{0x50,0xc3,0xa8,1,0x0f,0x85,-1,-1,-1,-1,0xf3,0x0f,0x10,0x1d,-1,-1,-1,-1,0xe9,-1,-1,-1,-1})||
@@ -121,7 +126,8 @@ bool SceneCameraReader::discover(Read read,uintptr_t image,uintptr_t managerRva)
  }
  if(!writable||!slotWritable)return false;
  layout.mode=uintptr_t(mode);
- for(auto span:{std::pair<int64_t,size_t>{gate,size_t(33+r12)},{normal,size_t(19+r12)},{list,size_t(11+r12)},{write,size_t(35+2*r12)},{render-47,78},{link,28}}){
+ int listPrefix=extendedR12?extendedLoopSize:0;
+ for(auto span:{std::pair<int64_t,size_t>{gate,size_t(33+r12)},{normal,size_t(19+r12)},{list-listPrefix,size_t(11+r12+listPrefix)},{write,size_t(35+2*r12)},{render-47,78},{link,28}}){
   if(span.first<0||size_t(span.first)>code.size()||span.second>code.size()-size_t(span.first))return false;
   Evidence e;e.address=base+uintptr_t(span.first);e.bytes.assign(code.begin()+span.first,code.begin()+span.first+span.second);layout.evidence.push_back(std::move(e));
  }
