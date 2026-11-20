@@ -25,8 +25,8 @@ void maintain(){
  if(hook.installed&&tick>=cacheDue&&(cached==pad::CachedHook::Pending||cached==pad::CachedHook::Attached)){
   auto previous=cached;cached=pad::attachCachedGameState(GetModuleHandleW(nullptr));cacheDue=tick+1000;
   if(cached!=previous){
-   if(cached==pad::CachedHook::Attached)emit("Controller cache attached: validated game profile; original chain preserved");
-   else if(cached==pad::CachedHook::Unsupported)emit("[SS-INPUT-006] Controller cache profile did not validate; import bridge only");
+   if(cached==pad::CachedHook::Attached)emit("Controller cache attached: validated game layout; original chain preserved");
+   else if(cached==pad::CachedHook::Unsupported)emit("[SS-INPUT-006] Controller cache layout did not validate; import bridge only");
    else if(cached!=pad::CachedHook::Pending)emit("[SS-INPUT-004] Controller cache unavailable or changed; capture unavailable");
   }
  }

@@ -7,7 +7,7 @@
 #include <string>
 namespace sketch {
 inline constexpr const char* FeedbackAddress="xlwpy@qq.com";
-inline constexpr const char* DiagnosticsBuild="game build 26787118 compatibility 20261120 | level camera settling drift fix 20261111 | game build 26466613 compatibility 20261111 | automatic candidate snapping 20261030 | aspect preview mapping 20261030 | independent camera fallback 20261029 | diagnostic copy 20261029";
+inline constexpr const char* DiagnosticsBuild="adaptive XInput cache 20261120 | game build 26787118 compatibility 20261120 | level camera settling drift fix 20261111 | game build 26466613 compatibility 20261111 | automatic candidate snapping 20261030 | aspect preview mapping 20261030 | independent camera fallback 20261029 | diagnostic copy 20261029";
 enum class FeedbackAction {OpenFolderAndCopyEmail,CopyDiagnostics};
 struct ReportDiagnostics {
  uint32_t outputWidth=0,outputHeight=0,windowWidth=0,windowHeight=0;

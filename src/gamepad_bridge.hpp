@@ -7,8 +7,7 @@ namespace sketch::pad {
 using GetState=DWORD(WINAPI*)(DWORD,XINPUT_STATE*);
 struct HookReport {unsigned resolvers=0,directStates=0;bool installed=false;};
 struct BridgeStats {uint64_t gameCalls=0,rawCalls=0,recursions=0;unsigned endpoints=0;bool degraded=false;uint64_t neutralized=0;};
-// Import bridge plus a guarded cache profile for Steam build 26249670. Other cached pointers,
-// delayed imports and queries from other modules are NOT retrospectively hooked.
+// Import bridge plus the validated XInput cache in the game executable.
 HookReport install(HMODULE consumer);
 enum class CachedHook { Unsupported, Pending, Attached, Conflict, Unavailable };
 // Called on the initialization/render owner thread, never from query callbacks.

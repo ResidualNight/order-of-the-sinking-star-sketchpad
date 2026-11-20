@@ -26,6 +26,8 @@ struct Bridge {
  std::array<Endpoint,MaxEndpoints> endpoints{};
  std::array<Patch,MaxPatches> patches{};
  unsigned count=0,patchCount=0;
+ HMODULE cacheConsumer=nullptr;
+ cache::Match cacheMatch{};
  Resolver resolver=nullptr;
  std::atomic<bool> enabled{false},capture{false},degraded{false},bypass{true};
  std::atomic<bool> entryEnabled{false};std::atomic<uint64_t> entryGeneration{0};std::atomic<unsigned> open{0};
@@ -189,10 +191,14 @@ CachedHook attachCachedGameState(HMODULE consumer) {
  auto&b=get();
  if(!consumer||!b.enabled.load()||b.degraded.load())return CachedHook::Unavailable;
  auto base=reinterpret_cast<uintptr_t>(consumer);
- auto rva=cache::locate([&](uint32_t offset,void*data,size_t bytes){
+ auto read=[&](uint32_t offset,void*data,size_t bytes){
   SIZE_T done=0;return offset<=UINTPTR_MAX-base&&ReadProcessMemory(GetCurrentProcess(),reinterpret_cast<void*>(base+offset),data,bytes,&done)&&done==bytes;
- });
+ };
+ if(b.cacheConsumer!=consumer){b.cacheConsumer=consumer;b.cacheMatch=cache::discover(read);}
+ const auto rva=b.cacheMatch.slotRva;
  if(!rva)return CachedHook::Unsupported;
+ // Recheck the evidence at its known addresses without rescanning .text.
+ if(!cache::revalidate(read,b.cacheMatch)){b.degraded=true;failOpen();return CachedHook::Conflict;}
  auto slot=reinterpret_cast<void**>(base+rva);void*current=nullptr;SIZE_T done=0;
  if(!ReadProcessMemory(GetCurrentProcess(),slot,&current,sizeof(current),&done)||done!=sizeof(current))return CachedHook::Unavailable;
  for(unsigned i=0;i<b.patchCount;++i)if(b.patches[i].slot==slot){

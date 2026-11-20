@@ -1,5 +1,5 @@
 ﻿[CmdletBinding()]
-param([ValidatePattern('^[0-9]+\.[0-9]+\.[0-9]+$')][string]$Version='0.3.1',[string]$RuntimeArchive,[string]$OutputDirectory)
+param([ValidatePattern('^[0-9]+\.[0-9]+\.[0-9]+$')][string]$Version='0.3.2',[string]$RuntimeArchive,[string]$OutputDirectory)
 $ErrorActionPreference='Stop'
 $root=$PSScriptRoot
 if(!$OutputDirectory){$OutputDirectory=Join-Path $root 'dist'}
@@ -57,6 +57,8 @@ $known=@(($known+'f60178573aca63d04abcf37cd2412c6f60e30beb1feb9acbf0c0d91ad9be13
 $known=@(($known+'19ddca5a00d4b8d40e59134bfee90f15748d73df42feb1848bbd17aaa62a695c') | Sort-Object -Unique)
 $known=@(($known+'bb0417af75097d430a47c24657e479862820b9ee2b74a178f83db556b9675a12') | Sort-Object -Unique)
 $known=@(($known+'3ee5b06cc39ebee6374028a149397ed4a910e9652d9fd14f23bccd35722ed590') | Sort-Object -Unique)
+$known=@(($known+'d6e5e733596f766c681eeabfd45339b3a26aaa870449040ae87567d991c4b84c') | Sort-Object -Unique)
+$known=@(($known+'45e0627ee78c3d280242f1ec211db17bd9b4b5b963715fc6a5ec6d5bd5b35c17') | Sort-Object -Unique)
 $package=[ordered]@{product='StarSketch';schema=1;version=$Version;known_dll_sha256=@($known);game_exe_sha256=$runtime.game_exe_sha256;files=$files}
 [IO.File]::WriteAllText((Join-Path $payload 'StarSketch-package.json'),($package | ConvertTo-Json -Depth 6),[Text.UTF8Encoding]::new($false))
 foreach($name in @('StarSketch-Setup.ps1','StarSketch.Installer.psm1','StarSketch-安装卸载.cmd')){Copy-Item -LiteralPath (Join-Path $root ('installer\'+$name)) -Destination (Join-Path $stage $name)}

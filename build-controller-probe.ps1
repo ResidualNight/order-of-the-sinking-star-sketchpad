@@ -22,17 +22,11 @@ if($LASTEXITCODE){throw 'Direct bridge tests compilation failed'}
 if($LASTEXITCODE){throw 'Probe compilation failed'}
 & $compiler @common -municode (Join-Path $root 'tests\gamepad_cache_tests.cpp') (Join-Path $root 'src\gamepad_bridge.cpp') -o (Join-Path $out 'gamepad_cache_tests.exe')
 if($LASTEXITCODE){throw 'Cached bridge tests compilation failed'}
-if($GameExecutable){
- & (Join-Path $out 'gamepad_cache_tests.exe') $GameExecutable
- if($LASTEXITCODE){throw 'Actual game cache profile / bridge tests failed'}
- & (Join-Path $out 'gamepad_cache_tests.exe') $GameExecutable --clean-remove
-}else{& (Join-Path $out 'gamepad_cache_tests.exe')}
-if($LASTEXITCODE){throw 'Cached bridge tests failed'}
-if($GameExecutable){
- & (Join-Path $out 'gamepad_cache_tests.exe') $GameExecutable --new-profile
- if($LASTEXITCODE){throw 'New cached bridge tests failed'}
- & (Join-Path $out 'gamepad_cache_tests.exe') $GameExecutable --new-profile-clean
- if($LASTEXITCODE){throw 'New cached bridge removal failed'}
+$cacheGame=if($GameExecutable){$GameExecutable}else{'-'}
+foreach($mode in @('--old-profile','--clean-remove','--new-profile','--new-profile-clean','--steam-26787118','--steam-26787118-clean','--adaptive','--adaptive-changed')){
+ & (Join-Path $out 'gamepad_cache_tests.exe') $cacheGame $mode
+ if($LASTEXITCODE){throw "Cached bridge tests failed: $mode"}
+ $cacheGame='-'
 }
 & $compiler @common (Join-Path $root 'tests\gamepad_entry_tests.cpp') -o (Join-Path $out 'gamepad_entry_tests.exe')
 if($LASTEXITCODE){throw 'Trigger entry compile failed'}
