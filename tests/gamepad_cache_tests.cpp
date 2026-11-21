@@ -74,8 +74,10 @@ static void offline(const wchar_t*path){
  std::vector<uint8_t> mappedImage(nt->OptionalHeader.SizeOfImage);CHECK(nt->OptionalHeader.SizeOfHeaders<=raw.size()&&nt->OptionalHeader.SizeOfHeaders<=mappedImage.size());std::memcpy(mappedImage.data(),raw.data(),nt->OptionalHeader.SizeOfHeaders);
  auto sections=IMAGE_FIRST_SECTION(nt);CHECK(reinterpret_cast<uint8_t*>(sections+nt->FileHeader.NumberOfSections)<=raw.data()+raw.size());
  for(unsigned i=0;i<nt->FileHeader.NumberOfSections;++i){auto&s=sections[i];CHECK(size_t(s.PointerToRawData)+s.SizeOfRawData<=raw.size()&&size_t(s.VirtualAddress)+s.SizeOfRawData<=mappedImage.size());std::memcpy(mappedImage.data()+s.VirtualAddress,raw.data()+s.PointerToRawData,s.SizeOfRawData);}
- auto located=locate(mappedImage);CHECK(located);std::printf("validated slot RVA: 0x%x\n",located);std::puts("actual EXE offline: initializer, call site, strings, import identities and writable cache agree");
- auto read=reader(mappedImage);cache::Image image;CHECK(cache::readImage(read,image));
+ auto read=reader(mappedImage);auto match=cache::discover(read);CHECK(match.slotRva&&cache::revalidate(read,match));
+ const auto located=match.slotRva;
+ std::printf("actual EXE: %s, init=0x%x caller=0x%x slot=0x%x\n",match.profile?"profile":"adaptive",match.initRva,match.callRva,located);
+ cache::Image image;CHECK(cache::readImage(read,image));
  auto adaptive=cache::discoverAdaptive(read,image);CHECK(adaptive.slotRva==located&&!adaptive.profile&&cache::revalidate(read,adaptive));
  std::printf("actual EXE offline: adaptive detection independently found the same slot RVA 0x%x\n",adaptive.slotRva);
 }

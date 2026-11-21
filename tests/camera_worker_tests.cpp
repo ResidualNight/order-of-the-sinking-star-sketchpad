@@ -12,6 +12,7 @@ struct GameGridWorkerTestAccess {
   reader.candidates.clear();if(camera)reader.candidates={{reinterpret_cast<uintptr_t>(camera),camera->frame(),camera->f[211],camera->sourceType()}};
  }
  static bool idle(const GameGridWorker& worker){return worker.idle();}
+ static void unknown(GameGridWorker& worker,uintptr_t image){worker.levelReader.selectLayout(image,nullptr);}
  static std::weak_ptr<void> lifetime(const GameGridWorker& worker){return worker.service;}
 };
 }
@@ -117,6 +118,23 @@ void checkCameraWorker(){
  std::cout<<"PASS: background stack capture, delivery/level guards, request cancellation, auxiliary/projection recovery previews and strict candidate priority\n";
 }
 
+void checkUnknownSceneWorker(uintptr_t image,size_t proofByte){
+ GameGridWorker worker;
+ GameGridWorkerTestAccess::unknown(worker,image);
+ LevelIdentity level;assert(worker.readCurrentLevel(level)&&level.valid());
+ assert(worker.buildWarning()==ErrorId::UnsupportedGameBuild);
+ assert(worker.begin(3840,2160,false,1));
+ Grid grid;GameGridState state;
+ until([&]{state=worker.poll(grid);return state!=GameGridState::Waiting;});
+ assert(state==GameGridState::Preview&&!worker.pickerOptions().empty());
+ assert(worker.pickerOptions().front().scenePose);
+ auto& evidence=*reinterpret_cast<uint8_t*>(image+proofByte);
+ evidence^=1;
+ assert(!worker.readCurrentLevel(level));
+ assert(worker.poll(grid)==GameGridState::Unavailable&&worker.error==ErrorId::LevelChanged);
+ evidence^=1;
+ worker.cancel();idle(worker);
+}
 void checkSceneCameraWorker(uintptr_t image,CameraFrame* camera,uintptr_t managerRva){
  GameGridWorker worker;auto slot=reinterpret_cast<uintptr_t*>(image+managerRva);
  *camera={};GameGridWorkerTestAccess::fixture(worker,slot,camera,true,managerRva);

@@ -20,7 +20,19 @@ bool padUiBlocksSegment(Point a,Point b){
 void App::openFromPad(){padOpening=true;setEditing(true);}
 void App::resetPadGesture(){padWheel=padWheelVisible=false;padWheelSelection=-1;finishGesture();cancelGesture();padReady=false;padRt=padLt=false;padRtPrevious=false;padDirection=0;padEraseConnected=false;}
 void App::choosePadTool(int index){resetPadGesture();padEraseTool=index==4;if(index<4)tool=static_cast<Kind>(index);}
-void App::padPrepare(const PadInput&input){
+void App::padPrepare(const PadInput&raw){
+ PadInput input=raw;
+ // Fence each component held on entry until its own release.
+ if(padEntrySample&&raw.connected){padFenceButtons=raw.buttons;padFenceLT=padFenceRT=true;padEntrySample=false;}
+ padFenceButtons&=raw.buttons;input.buttons&=~padFenceButtons;
+ padFenceLT=padFenceLT&&raw.lt>30;if(padFenceLT)input.lt=0;
+ padFenceRT=padFenceRT&&raw.rt>30;if(padFenceRT)input.rt=0;
+ auto fenceStick=[&](float&x,float&y,bool&fence){
+  if(length(padui::stick(x,y))==0)fence=false;
+  else if(editing&&padPointer&&!padReady&&!padWheel)fence=true;
+  if(fence)x=y=0;
+ };
+ fenceStick(input.lx,input.ly,padFenceLeft);fenceStick(input.rx,input.ry,padFenceRight);
  padInput=input;padHeld=padControls(input,padHeld);auto&io=ImGui::GetIO();bool menu=editing&&padMenu()&&!padWheel&&input.connected;
  bool meaningful=input.buttons||input.lt>160||input.rt>160||length(padui::stick(input.lx,input.ly))>.2f||length(padui::stick(input.rx,input.ry))>.2f;
  if(editing&&input.connected&&meaningful&&!padPointer&&!io.MouseDown[0]&&!io.MouseDown[1]&&!drawing&&!erasing&&!numbering){resetPadGesture();padPointer=true;}

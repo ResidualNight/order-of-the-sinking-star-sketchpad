@@ -12,7 +12,9 @@ int main(int argc,char**argv){
  XINPUT_STATE raw{},out{};for(unsigned i=0;i<4;++i)setter(i,&raw,i==2?0:ERROR_DEVICE_NOT_CONNECTED);
  App app;auto frame=[&](bool foreground=true){controller::poll(app,foreground);ImGui::NewFrame();app.frame(1920,1080);ImGui::Render();if(app.wantExit){app.wantExit=false;app.setEditing(false);}controller::synchronize(app,foreground);};
  frame();assert(!app.editing);assert(game(2,&out)==0);
- raw.Gamepad.bLeftTrigger=raw.Gamepad.bRightTrigger=220;setter(2,&raw,0);assert(game(2,&out)==0&&pad::openRequest()==3);frame();assert(app.editing&&app.padLayout&&app.padPointer&&!app.padReady&&pad::capturing()&&!pad::openRequest());assert(app.document.marks.empty());
+ raw.Gamepad.sThumbLX=16000;raw.Gamepad.bLeftTrigger=raw.Gamepad.bRightTrigger=220;setter(2,&raw,0);assert(game(2,&out)==0&&pad::openRequest()==3);frame();assert(app.editing&&app.padLayout&&app.padPointer&&app.padReady&&pad::capturing()&&!pad::openRequest());assert(app.document.marks.empty());
+ raw.Gamepad.wButtons=XINPUT_GAMEPAD_A;setter(2,&raw,0);frame();assert(app.padQuick);
+ raw.Gamepad.wButtons=0;setter(2,&raw,0);frame();frame();raw.Gamepad.wButtons=XINPUT_GAMEPAD_B;setter(2,&raw,0);frame();assert(app.editing&&!app.padQuick&&app.document.marks.empty());
  raw.Gamepad={};setter(2,&raw,0);frame();assert(app.padReady);app.gridRefresh.cancel();raw.Gamepad.bRightTrigger=255;setter(2,&raw,0);frame();assert(app.document.marks.size()==1);raw.Gamepad={};setter(2,&raw,0);frame();
  // A second connected pad must not take over a disconnected session owner.
  setter(2,&raw,ERROR_DEVICE_NOT_CONNECTED);raw.Gamepad.bRightTrigger=255;setter(0,&raw,0);Sleep(1050);frame();assert(app.editing&&!app.padInput.connected&&app.document.marks.size()==1);

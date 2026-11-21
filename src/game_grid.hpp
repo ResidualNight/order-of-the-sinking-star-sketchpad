@@ -33,13 +33,16 @@ class GameGridReader {
  size_t sceneReads=0,sceneMatches=0,sceneFresh=0;
  LevelIdentity pickerLevel;bool picking=false;
  bool settleCamera=false;GridStability stability;
- uintptr_t image=0,manager=0,managerRva=GameLayouts[0].managerRva;bool checked=false,supported=false,heightOverride=false,rejectedCameraOrientation=false;
+ uintptr_t image=0,manager=0,managerRva=GameLayouts[0].managerRva;
+ bool checked=false,supported=false,adaptiveManager=false,heightOverride=false,rejectedCameraOrientation=false;
  float width=0,height=0,forcedZ=1;uint64_t started=0,lastScan=0;
  CameraScanStats scanStats;
  uint64_t scanIntervalMs=250;bool scanOwnThread=true;
  CameraDiagnostics cameraDiagnostics;uint64_t requestSerial=0;bool levelValidated=false,planeSelected=false;
  std::string scanDiagnostic()const;
- bool readLevel();void scan();bool verifyBuild();
+ bool readLevel();void scan();void verifyBuild();
+ void selectLayout(uintptr_t module,const GameLayout* known);
+ const char* layoutName()const{return adaptiveManager?"adaptive":gameLayoutName(managerRva);}
  GameGridState pollCandidate(Grid& grid);
  void observeCamera(uintptr_t address,const CameraFrame& frame,CameraStage stage);
  void rememberCandidate(Candidate candidate);

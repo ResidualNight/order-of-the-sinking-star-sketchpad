@@ -34,6 +34,7 @@ static bool row(const char* id,const char* key,const char* text,bool on=false){
 bool App::setEditing(bool enabled){
  if(editing==enabled)return false;
  editing=enabled;
+ padEntrySample=enabled&&padOpening;padFenceButtons=0;padFenceLT=padFenceRT=padFenceLeft=padFenceRight=false;
  if(enabled){
   padLayout=padUiMode==2||(padUiMode==0&&padOpening);padPointer=padOpening;padReady=false;padQuick=false;padConfirmClear=false;padEraseTool=false;
   if(padOpening&&!padUsed){tool=Kind::Pin;padUsed=true;}padOpening=false;

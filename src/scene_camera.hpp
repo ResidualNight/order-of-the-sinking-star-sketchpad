@@ -21,9 +21,10 @@ public:
  struct Layout {uintptr_t image=0,size=0,managerSlot=0,mode=0;uint32_t position=0,orientation=0,projection=0,cameras=0;std::vector<Evidence> evidence;};
 private:
  Layout layout;
- bool current(Read)const;
 public:
+ bool current(Read)const;
  const char* status="not_attempted";
+ // A zero expected RVA derives the manager slot from the complete scene proof.
  bool discover(Read,uintptr_t image,uintptr_t managerRva=0xb69600);
  bool sample(Read,uintptr_t manager,SceneCameraPose& output);
  bool available()const{return layout.managerSlot!=0;}

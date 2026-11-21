@@ -20,6 +20,7 @@ public:
  int padUiMode=0;bool padEntryEnabled=true;float padSpeed=1,padWheelScale=.8f,padWheelOpacity=1;
  bool padNavBusy=false;bool padLayout=false,padOpening=false,padUsed=false,padPointer=false,padReady=false,padQuick=false,padEraseTool=false,padConfirmClear=false;
  bool padWheel=false,padWheelVisible=false;int padWheelSelection=-1;double padWheelStarted=0;
+ bool padEntrySample=false,padFenceLT=false,padFenceRT=false,padFenceLeft=false,padFenceRight=false;uint16_t padFenceButtons=0;
  int padPage=0;PadInput padInput{};uint16_t padPrevious=0,padPressed=0;
  bool padRt=false,padLt=false,padRtPrevious=false,padEraseConnected=false;Point padCursor{};
  float padWidth=0,padHeight=0;double padRepeatAt=0;uint16_t padDirection=0;

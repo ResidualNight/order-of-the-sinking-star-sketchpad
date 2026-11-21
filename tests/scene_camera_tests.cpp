@@ -64,7 +64,10 @@ struct Fixture {
    const size_t mode=extendedLoop?0xb7ca80:Mode,slot=extendedLoop?0xb7b6f0:0xb68618;
    put(image,Gate+11,int32_t(mode-Gate-15));put(image,Gate+20,int32_t(Normal-Gate-24));put(image,Gate+30,int32_t(Frozen-Gate-34));
    pattern(image,Normal,{0x4c,0x89,0x74,0x24,0,0x49,0x83,0xbc,0x24,0x38,5,0,0,0,0x0f,0x8e,0,0,0,0});
-   if(extendedLoop)pattern(image,Normal+54,{0x49,0xff,0xc7,0x4d,0x3b,0xbc,0x24,0x38,5,0,0,0x0f,0x8d,0,0,0,0});
+   if(extendedLoop){
+    pattern(image,Normal+54,{0x49,0xff,0xc7,0x4d,0x3b,0xbc,0x24,0x38,5,0,0,0x0f,0x8d,0,0,0,0});
+    put(image,Normal+16,int32_t(160-20));put(image,Normal+67,int32_t(160-71));
+   }
    else{put(image,Normal+60,uint32_t(0x538));image[Normal+69]=0xcc;}
    pattern(image,Normal+70+extendedLoop,{0x49,0x8b,0x84,0x24,0x40,5,0,0,0x4a,0x8b,0x1c,0xf8});
    pattern(image,Frozen-19,{0x41,0x0f,0x13,0x84,0x24,0x98,0x3d,0,0,0xf3,0x41,0x0f,0x11,0x94,0x24,0xa0,0x3d,0,0,0x49,0x8b,0x04,0x24,0x48,0x83,0xc0,0xfb,0x48,0x83,0xf8,0x14,0x0f,0x87,0,0,0,0});
@@ -84,13 +87,20 @@ void verifyFile(const char* filename){
  std::vector<unsigned char> mapped(nt->OptionalHeader.SizeOfImage);std::memcpy(mapped.data(),bytes.data(),nt->OptionalHeader.SizeOfHeaders);
  auto sections=IMAGE_FIRST_SECTION(nt);for(unsigned i=0;i<nt->FileHeader.NumberOfSections;++i){const auto& s=sections[i];assert(size_t(s.PointerToRawData)+s.SizeOfRawData<=bytes.size()&&size_t(s.VirtualAddress)+s.SizeOfRawData<=mapped.size());std::memcpy(mapped.data()+s.VirtualAddress,bytes.data()+s.PointerToRawData,s.SizeOfRawData);}
  SceneCameraReader reader;auto base=reinterpret_cast<uintptr_t>(mapped.data());
- bool found=false;for(const auto& layout:GameLayouts)if(reader.discover(readMemory,base,layout.managerRva)){found=true;break;}assert(found);
- assert(reader.discovered().position==0x3d98&&reader.discovered().orientation==0x3db0&&reader.discovered().projection==0x3dc0);
+ assert(reader.discover(readMemory,base,0));
+ auto expected=reader.discovered();
+ if(expected.managerSlot-base==0xb6cd58)assert(expected.mode-base==0xb6d9b0&&expected.cameras==0x538);
+ assert(reader.discover(readMemory,base,expected.managerSlot-base)&&reader.discovered().mode==expected.mode);
+ std::cout<<"Actual scene layout: manager=0x"<<std::hex<<expected.managerSlot-base<<" mode=0x"<<expected.mode-base<<std::dec<<"\n";
+ for(const auto& known:GameLayouts)if(known.managerRva==expected.managerSlot-base){
+  assert(expected.position==0x3d98&&expected.orientation==0x3db0&&expected.projection==0x3dc0);
+ }
  std::cout<<"PASS: real game PE signature/field cross-check (offline data only)\n";
 }
 }
 void checkSceneCameraReaderFixture(uintptr_t image,CameraFrame* raw,const SceneCameraPose& pose,uintptr_t managerRva=0xb69600);
 void checkSceneCameraWorker(uintptr_t image,CameraFrame* raw,uintptr_t managerRva=0xb69600);
+void checkUnknownSceneWorker(uintptr_t image,size_t proofByte);
 void checkSceneCamera(const char* filename){
  auto pose=fixturePose();assert(pose.valid());auto camera=gameCameraFixture();
  // Compare every screen mapping against independent viewport arithmetic.
@@ -189,6 +199,23 @@ void checkSceneCamera(const char* filename){
  current->image[Fixture::Normal+56]^=1;
  camera=gameCameraFixture();checkSceneCameraReaderFixture(current->base(),&camera,pose,currentSlot);
  camera=gameCameraFixture();checkSceneCameraWorker(current->base(),&camera,currentSlot);
+ // Unknown hash, new global slot, mode and loop alignment; no old slot is populated.
+ constexpr size_t futureSlot=0xb779a0,futureMode=0xb78218;
+ put(current->image,currentSlot,uintptr_t(0));put(current->image,futureSlot,current->root());
+ put(current->image,Fixture::Link+3,int32_t(futureSlot-Fixture::Link-7));
+ put(current->image,Fixture::Gate+11,int32_t(futureMode-Fixture::Gate-15));
+ auto loop=Fixture::Normal+54,shifted=loop+11;
+ std::memmove(current->image.data()+shifted,current->image.data()+loop,29);
+ std::fill_n(current->image.begin()+loop,11,0x90);
+ put(current->image,shifted+13,int32_t(Fixture::Normal+160-shifted-17));
+ assert(reader.discover(readMemory,current->base(),0)&&reader.sample(readMemory,current->root(),result));
+ assert(reader.discovered().managerSlot==current->base()+futureSlot&&reader.discovered().mode==current->base()+futureMode);
+ checkUnknownSceneWorker(current->base(),shifted+7);
+ current->image[shifted+13]^=1;assert(!reader.discover(readMemory,current->base(),0));current->image[shifted+13]^=1;
+ const auto duplicate=shifted+32;
+ std::memcpy(current->image.data()+duplicate,current->image.data()+shifted,29);
+ put(current->image,duplicate+13,int32_t(Fixture::Normal+160-duplicate-17));
+ assert(!reader.discover(readMemory,current->base(),0));
  verifyFile(filename);
  std::cout<<"PASS: scene pose projection vs captured matrix, source/map guards, six code proofs, layout ambiguity/conflicts and original fallback\n";
 }

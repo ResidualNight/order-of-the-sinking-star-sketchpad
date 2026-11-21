@@ -1,2 +1,2 @@
 #pragma once
-namespace sketch {inline constexpr const char* CurrentVersion="0.3.2";}
+namespace sketch {inline constexpr const char* CurrentVersion="0.3.3";}

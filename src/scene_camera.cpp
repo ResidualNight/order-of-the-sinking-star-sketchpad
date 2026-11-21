@@ -83,7 +83,7 @@ bool SceneCameraReader::discover(Read read,uintptr_t image,uintptr_t managerRva)
  uintptr_t base=0;std::vector<unsigned char> code;std::vector<IMAGE_SECTION_HEADER> sections;
  for(unsigned i=0;i<nt.FileHeader.NumberOfSections;++i){IMAGE_SECTION_HEADER section{};if(!get(read,table+i*sizeof(section),section))return false;sections.push_back(section);
   if(std::memcmp(section.Name,".text\0\0\0",8))continue;
-  if(base||!(section.Characteristics&IMAGE_SCN_MEM_EXECUTE)||section.Misc.VirtualSize>64*1024*1024||!section.Misc.VirtualSize||
+  if(base||(section.Characteristics&(IMAGE_SCN_MEM_EXECUTE|IMAGE_SCN_MEM_READ|IMAGE_SCN_MEM_WRITE))!=(IMAGE_SCN_MEM_EXECUTE|IMAGE_SCN_MEM_READ)||section.Misc.VirtualSize>64*1024*1024||!section.Misc.VirtualSize||
      !contains(image,layout.size,image+section.VirtualAddress,section.Misc.VirtualSize))return false;
   base=image+section.VirtualAddress;code.resize(section.Misc.VirtualSize);if(!read(base,code.data(),code.size()))return false;
  }
@@ -99,13 +99,22 @@ bool SceneCameraReader::discover(Read read,uintptr_t image,uintptr_t managerRva)
  // Build 26466613 uses R13 for the manager and R15 for the list index.
  // Its loop is one byte longer than r67271; retain the complete list proof.
  bool r13R15=!r12&&matches(code,normal+70,{0x49,0x8b,0x85,-1,-1,-1,-1,0x4a,0x8b,0x1c,0xf8});
- // Build 26787118 moves the R12 loop one byte later. Verify the index increment,
- // count comparison and conditional jump immediately before the list load.
- constexpr int extendedLoopOffset=54,extendedLoopSize=17;
- bool extendedR12=r12&&matches(code,normal+extendedLoopOffset,{0x49,0xff,0xc7,0x4d,0x3b,0xbc,0x24,-1,-1,-1,-1,0x0f,0x8d,-1,-1,-1,-1});
- int loopShift=(r12||r13R15)?1:0;
- if(extendedR12)++loopShift;
- int64_t list=normal+69+loopShift,write=frozen-(r12?19:17);
+ const int loopShift=(r12||r13R15)?1:0;
+ int64_t list=normal+69+loopShift,loopCount=normal+59+loopShift;
+ int listPrefix=0;
+ if(r12){
+  // Alignment padding changes between builds. Count, exit branch and indexed
+  // load identify the loop together, independently of that padding.
+  for(int offset=20;offset<=128;++offset){
+   const auto at=normal+offset;
+   if(!matches(code,at,{0x49,0xff,0xc7,0x4d,0x3b,0xbc,0x24,-1,-1,-1,-1,0x0f,0x8d,-1,-1,-1,-1,
+                        0x49,0x8b,0x84,0x24,-1,-1,-1,-1,0x4a,0x8b,0x1c,0xf8}))continue;
+   const auto exit=at+17+value<int32_t>(code,at+13);
+   if(listPrefix||exit!=normal+20+value<int32_t>(code,normal+16)||exit<at+29||exit>=int64_t(code.size()))return false;
+   listPrefix=17;list=at+listPrefix;loopCount=at+7;
+  }
+ }
+ const int64_t write=frozen-(r12?19:17);
  if(!(r12?matches(code,normal,{0x4c,0x89,0x74,0x24,-1,0x49,0x83,0xbc,0x24,-1,-1,-1,-1,0,0x0f,0x8e,-1,-1,-1,-1}):matches(code,normal,{0x4c,0x89,0x74,0x24,-1,0x49,0x83,0xbd,-1,-1,-1,-1,0,0x0f,0x8e,-1,-1,-1,-1}))||
     !matches(code,normal-23,{0x50,0xc3,0xa8,1,0x0f,0x85,-1,-1,-1,-1,0xf3,0x0f,0x10,0x1d,-1,-1,-1,-1,0xe9,-1,-1,-1,-1})||
     !(r12?matches(code,list,{0x49,0x8b,0x84,0x24,-1,-1,-1,-1,0x4a,0x8b,0x1c,0xf8}):r13R15?matches(code,list,{0x49,0x8b,0x85,-1,-1,-1,-1,0x4a,0x8b,0x1c,0xf8}):matches(code,list,{0x49,0x8b,0x85,-1,-1,-1,-1,0x4c,0x8b,0x34,0xd8}))||
@@ -115,19 +124,27 @@ bool SceneCameraReader::discover(Read read,uintptr_t image,uintptr_t managerRva)
  layout.position=value<uint32_t>(code,gate+3+r12);layout.orientation=value<uint32_t>(code,render+3);layout.projection=value<uint32_t>(code,render+11);layout.cameras=value<uint32_t>(code,normal+8+r12);
  int64_t slot=int64_t(base)+link+7+value<int32_t>(code,link+3),mode=int64_t(base)+gate+14+r12+value<int32_t>(code,gate+10+r12);
  if(layout.position<0x380||layout.position>0x100000||layout.orientation!=layout.position+24||layout.projection!=layout.orientation+16||
-    layout.cameras<0x380||layout.cameras+16>layout.position||value<uint32_t>(code,normal+59+loopShift)!=layout.cameras||value<uint32_t>(code,list+3+r12)!=layout.cameras+8||
+    layout.cameras<0x380||layout.cameras>layout.position-16||value<uint32_t>(code,loopCount)!=layout.cameras||value<uint32_t>(code,list+3+r12)!=layout.cameras+8||
     value<uint32_t>(code,write+4+r12)!=layout.position||value<uint32_t>(code,frozen-4)!=layout.position+8||value<uint32_t>(code,render-44)!=layout.position||
     value<uint32_t>(code,render+19)!=layout.projection+4||value<uint32_t>(code,render+27)!=layout.projection+8||
     value<uint32_t>(code,link+10)!=layout.position||value<uint32_t>(code,link+17)!=layout.orientation||
-    slot<=0||mode<=0||slot!=int64_t(image+managerRva)||mode==slot||!contains(image,layout.size,uintptr_t(mode),8))return false;
- bool writable=false,slotWritable=false;for(const auto& s:sections)if((s.Characteristics&(IMAGE_SCN_MEM_WRITE|IMAGE_SCN_MEM_EXECUTE))==IMAGE_SCN_MEM_WRITE){
-  if(contains(image+s.VirtualAddress,s.Misc.VirtualSize,uintptr_t(mode),8))writable=true;
-  if(contains(image+s.VirtualAddress,s.Misc.VirtualSize,uintptr_t(slot),8))slotWritable=true;
- }
- if(!writable||!slotWritable)return false;
+    slot<=0||mode<=0||(managerRva&&slot!=int64_t(image+managerRva))||mode==slot||(slot%8)||(mode%8)||
+    !contains(image,layout.size,uintptr_t(slot),8)||!contains(image,layout.size,uintptr_t(mode),8))return false;
+ auto writableSlot=[&](uintptr_t address){
+  unsigned owners=0;
+  for(const auto& section:sections){
+   if(!contains(image,layout.size,image+section.VirtualAddress,section.Misc.VirtualSize))return false;
+   if(!contains(image+section.VirtualAddress,section.Misc.VirtualSize,address,8))continue;
+   if((section.Characteristics&(IMAGE_SCN_MEM_READ|IMAGE_SCN_MEM_WRITE|IMAGE_SCN_MEM_EXECUTE))!=(IMAGE_SCN_MEM_READ|IMAGE_SCN_MEM_WRITE))return false;
+   ++owners;
+  }
+  return owners==1;
+ };
+ if(!writableSlot(uintptr_t(slot))||!writableSlot(uintptr_t(mode)))return false;
  layout.mode=uintptr_t(mode);
- int listPrefix=extendedR12?extendedLoopSize:0;
- for(auto span:{std::pair<int64_t,size_t>{gate,size_t(33+r12)},{normal,size_t(19+r12)},{list-listPrefix,size_t(11+r12+listPrefix)},{write,size_t(35+2*r12)},{render-47,78},{link,28}}){
+ // Cover the preceding normal-path gate and the repeated count operand too.
+ if(!listPrefix)listPrefix=int(list-loopCount);
+ for(auto span:{std::pair<int64_t,size_t>{gate,size_t(33+r12)},{normal-23,size_t(42+r12)},{list-listPrefix,size_t(11+r12+listPrefix)},{write,size_t(35+2*r12)},{render-47,78},{link,28}}){
   if(span.first<0||size_t(span.first)>code.size()||span.second>code.size()-size_t(span.first))return false;
   Evidence e;e.address=base+uintptr_t(span.first);e.bytes.assign(code.begin()+span.first,code.begin()+span.first+span.second);layout.evidence.push_back(std::move(e));
  }
